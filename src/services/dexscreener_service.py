@@ -6,6 +6,7 @@ DexScreener数据服务
 
 import time
 import json
+import sys
 import asyncio
 import requests
 import cloudscraper
@@ -1435,8 +1436,10 @@ class DexScreenerService:
         """
         try:
             import undetected_chromedriver as uc
-        except ImportError:
-            logger.error("未安装 undetected-chromedriver，请运行: pip install undetected-chromedriver")
+        except ImportError as e:
+            logger.error(f"无法导入 undetected-chromedriver: {e}")
+            logger.error(f"当前 Python 路径: {sys.executable}")
+            logger.error("请在虚拟环境中运行: source venv/bin/activate && pip install undetected-chromedriver")
             return []
 
         logger.info(f"使用 undetected-chromedriver 爬取 {chain.upper()} 链...")

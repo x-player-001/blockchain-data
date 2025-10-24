@@ -2,8 +2,13 @@
 """
 定时任务守护进程
 负责运行两个定时任务：
-1. 每10分钟爬取 DexScreener 首页数据
+1. 每10分钟爬取 DexScreener 首页数据（可选）
 2. 每5分钟运行监控更新价格
+
+使用方法：
+- 启动所有任务（爬虫+监控）：python scheduler_daemon.py
+- 只启动监控任务：python scheduler_daemon.py --monitor-only
+- 查看帮助：python scheduler_daemon.py --help
 """
 
 import asyncio
@@ -11,6 +16,7 @@ import logging
 import signal
 import sys
 import random
+import argparse
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -33,6 +39,7 @@ logger = logging.getLogger(__name__)
 # 全局变量
 scheduler = None
 monitor_service = None
+enable_scraper = True  # 是否启用爬虫任务
 
 
 async def scrape_dexscreener_task():
@@ -103,7 +110,12 @@ def schedule_next_scrape():
     """
     调度下一次爬取任务（随机间隔9-15分钟）
     """
-    global scheduler
+    global scheduler, enable_scraper
+
+    # 如果爬虫被禁用，不调度
+    if not enable_scraper:
+        return
+
     if scheduler:
         # 计算随机间隔时间（9-15分钟）
         next_run_minutes = random.uniform(9, 15)
@@ -198,7 +210,40 @@ async def main():
     """
     主函数：启动调度器
     """
-    global scheduler, monitor_service
+    global scheduler, monitor_service, enable_scraper
+
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(
+        description='定时任务守护进程：监控代币价格和爬取 DexScreener 数据',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例用法：
+  python scheduler_daemon.py                   # 启动所有任务（爬虫+监控）
+  python scheduler_daemon.py --monitor-only    # 只启动监控任务（不爬取）
+  python scheduler_daemon.py --scraper-only    # 只启动爬虫任务（不监控）
+        """
+    )
+    parser.add_argument(
+        '--monitor-only',
+        action='store_true',
+        help='只启动监控价格任务，不启动爬虫'
+    )
+    parser.add_argument(
+        '--scraper-only',
+        action='store_true',
+        help='只启动爬虫任务，不启动监控'
+    )
+
+    args = parser.parse_args()
+
+    # 检查参数冲突
+    if args.monitor_only and args.scraper_only:
+        logger.error("错误: --monitor-only 和 --scraper-only 不能同时使用")
+        sys.exit(1)
+
+    # 确定启用哪些任务
+    enable_scraper = not args.monitor_only
+    enable_monitor = not args.scraper_only
 
     logger.info("="*80)
     logger.info("定时任务守护进程启动")
@@ -214,31 +259,37 @@ async def main():
     # 创建调度器
     scheduler = AsyncIOScheduler(timezone='UTC')
 
-    # 添加任务2: 每5分钟监控价格
-    scheduler.add_job(
-        monitor_prices_task,
-        trigger=IntervalTrigger(minutes=5),
-        id='monitor_prices',
-        name='监控代币价格',
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=30
-    )
+    # 根据参数添加任务
+    if enable_monitor:
+        scheduler.add_job(
+            monitor_prices_task,
+            trigger=IntervalTrigger(minutes=5),
+            id='monitor_prices',
+            name='监控代币价格',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=30
+        )
+        logger.info("✅ 已启用任务：每5分钟监控代币价格")
 
     # 启动调度器
     scheduler.start()
 
     logger.info("调度器已启动，任务计划：")
-    logger.info("  - 随机间隔9-15分钟爬取 DexScreener 首页（BSC + Solana，支持重试机制）")
-    logger.info("  - 每5分钟监控代币价格（更新 monitored_tokens 表并触发报警 + 更新 potential_tokens AVE 数据）")
+    if enable_scraper:
+        logger.info("  - 随机间隔9-15分钟爬取 DexScreener 首页（BSC + Solana，支持重试机制）")
+    if enable_monitor:
+        logger.info("  - 每5分钟监控代币价格（更新 monitored_tokens 表并触发报警 + 更新 potential_tokens AVE 数据）")
     logger.info("="*80)
 
     # 启动时立即执行一次任务
-    logger.info("立即执行一次爬取任务...")
-    await scrape_dexscreener_task()
+    if enable_scraper:
+        logger.info("立即执行一次爬取任务...")
+        await scrape_dexscreener_task()
 
-    logger.info("立即执行一次监控任务...")
-    await monitor_prices_task()
+    if enable_monitor:
+        logger.info("立即执行一次监控任务...")
+        await monitor_prices_task()
 
     # 保持运行
     try:

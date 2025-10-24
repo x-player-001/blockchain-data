@@ -10,9 +10,11 @@ import asyncio
 import logging
 import signal
 import sys
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.date import DateTrigger
 
 from src.services.token_monitor_service import TokenMonitorService
 from src.services.multi_chain_scraper import MultiChainScraper
@@ -35,8 +37,9 @@ monitor_service = None
 
 async def scrape_dexscreener_task():
     """
-    爬取 DexScreener 首页任务（每10分钟）
+    爬取 DexScreener 首页任务（随机间隔9-15分钟）
     使用 cloudscraper 爬取 BSC 和 Solana 链
+    支持重试机制提高成功率
     """
     scraper = None
     monitor_service = None
@@ -80,8 +83,13 @@ async def scrape_dexscreener_task():
             )
             logger.info("="*80)
 
+        # 调度下一次爬取任务（随机间隔9-15分钟）
+        schedule_next_scrape()
+
     except Exception as e:
         logger.error(f"爬取任务失败: {e}", exc_info=True)
+        # 即使失败也要调度下一次
+        schedule_next_scrape()
 
     finally:
         # 关闭连接
@@ -89,6 +97,38 @@ async def scrape_dexscreener_task():
             await scraper.close()
         if monitor_service:
             await monitor_service.close()
+
+
+def schedule_next_scrape():
+    """
+    调度下一次爬取任务（随机间隔9-15分钟）
+    """
+    global scheduler
+    if scheduler:
+        # 计算随机间隔时间（9-15分钟）
+        next_run_minutes = random.uniform(9, 15)
+        next_run_time = datetime.now() + timedelta(minutes=next_run_minutes)
+
+        # 移除旧的爬取任务
+        try:
+            scheduler.remove_job('scrape_dexscreener')
+        except:
+            pass
+
+        # 添加新的一次性任务
+        scheduler.add_job(
+            scrape_dexscreener_task,
+            trigger=DateTrigger(run_date=next_run_time),
+            id='scrape_dexscreener',
+            name='爬取DexScreener首页',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=60
+        )
+
+        logger.info(f"📅 下次爬取时间: {next_run_time.strftime('%Y-%m-%d %H:%M:%S')} "
+                   f"(间隔 {next_run_minutes:.1f} 分钟)")
+
 
 
 async def monitor_prices_task():
@@ -174,17 +214,6 @@ async def main():
     # 创建调度器
     scheduler = AsyncIOScheduler(timezone='UTC')
 
-    # 添加任务1: 每10分钟爬取 DexScreener 首页
-    scheduler.add_job(
-        scrape_dexscreener_task,
-        trigger=IntervalTrigger(minutes=10),
-        id='scrape_dexscreener',
-        name='爬取DexScreener首页',
-        max_instances=1,  # 同时只运行一个实例
-        coalesce=True,    # 如果上次任务未完成，跳过本次
-        misfire_grace_time=60  # 超时60秒后不再执行
-    )
-
     # 添加任务2: 每5分钟监控价格
     scheduler.add_job(
         monitor_prices_task,
@@ -200,7 +229,7 @@ async def main():
     scheduler.start()
 
     logger.info("调度器已启动，任务计划：")
-    logger.info("  - 每10分钟爬取 DexScreener 首页（BSC + Solana，保存到 potential_tokens 表 + 立即更新 AVE 数据）")
+    logger.info("  - 随机间隔9-15分钟爬取 DexScreener 首页（BSC + Solana，支持重试机制）")
     logger.info("  - 每5分钟监控代币价格（更新 monitored_tokens 表并触发报警 + 更新 potential_tokens AVE 数据）")
     logger.info("="*80)
 

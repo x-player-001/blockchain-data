@@ -9,6 +9,7 @@ import json
 import asyncio
 import requests
 import cloudscraper
+import random
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime, timedelta
@@ -23,6 +24,15 @@ from src.storage.models import DexScreenerToken
 from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
+
+# User-Agent 池，增加请求多样性
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+]
 
 
 class DexScreenerService:
@@ -1288,20 +1298,23 @@ class DexScreenerService:
     def scrape_with_cloudscraper(
         self,
         chain: str = 'bsc',
-        limit: int = 100
+        limit: int = 100,
+        max_retries: int = 2
     ) -> List[Dict[str, Any]]:
         """
-        使用 cloudscraper 爬取 DexScreener（替代 Selenium）
+        使用 cloudscraper 爬取 DexScreener（支持重试机制）
 
         优势:
         - 无需启动浏览器，速度快
         - 资源占用少
         - 成功绕过 Cloudflare
         - 适合服务器定时任务
+        - 自动重试提升成功率
 
         Args:
             chain: 链名称 (bsc, solana)
             limit: 最多获取多少个代币
+            max_retries: 最大重试次数（默认2次）
 
         Returns:
             代币列表，每个包含: pair_address, token_symbol, token_name, price_usd,
@@ -1309,64 +1322,89 @@ class DexScreenerService:
         """
         logger.info(f"使用 cloudscraper 爬取 {chain.upper()} 链...")
 
-        # 创建 cloudscraper 实例
-        scraper = cloudscraper.create_scraper(
-            browser={'browser': 'chrome', 'platform': 'darwin', 'mobile': False, 'desktop': True},
-            delay=10,
-        )
+        # 重试机制
+        for attempt in range(max_retries + 1):
+            if attempt > 0:
+                # 重试前随机等待 5-10 秒
+                wait_time = random.uniform(5, 10)
+                logger.warning(f"第 {attempt} 次重试，等待 {wait_time:.1f} 秒...")
+                time.sleep(wait_time)
 
-        # 关键：必须包含这些 Sec-Fetch-* 头才能绕过 Cloudflare
-        headers = {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-        }
+            try:
+                # 随机选择 User-Agent
+                user_agent = random.choice(USER_AGENTS)
 
-        url = f"https://dexscreener.com/{chain}"
+                # 创建 cloudscraper 实例
+                scraper = cloudscraper.create_scraper(
+                    browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False, 'desktop': True},
+                    delay=10,
+                )
 
-        try:
-            response = scraper.get(url, headers=headers, timeout=30)
-        except Exception as e:
-            logger.error(f"请求失败: {e}")
-            return []
+                # 优化的请求头，增加真实性
+                headers = {
+                    'User-Agent': user_agent,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Cache-Control': 'max-age=0',
+                }
 
-        if response.status_code != 200:
-            logger.error(f"状态码: {response.status_code}")
-            return []
+                url = f"https://dexscreener.com/{chain}"
 
-        if '请稍候' in response.text or 'Just a moment' in response.text:
-            logger.error("被 Cloudflare 拦截")
-            return []
+                # 首次请求前也添加随机延迟（避免被识别为机器人）
+                if attempt == 0:
+                    initial_delay = random.uniform(1, 3)
+                    time.sleep(initial_delay)
 
-        logger.debug(f"响应大小: {len(response.text):,} 字符")
+                response = scraper.get(url, headers=headers, timeout=30)
 
-        # 解析 HTML
-        soup = BeautifulSoup(response.text, 'html.parser')
-        token_rows = soup.select('a.ds-dex-table-row')
+                if response.status_code != 200:
+                    logger.warning(f"状态码异常: {response.status_code}")
+                    continue
 
-        if not token_rows:
-            logger.warning("未找到代币行")
-            return []
+                if '请稍候' in response.text or 'Just a moment' in response.text:
+                    logger.warning("被 Cloudflare 拦截")
+                    continue
 
-        logger.info(f"找到 {len(token_rows)} 个代币行")
+                logger.debug(f"响应大小: {len(response.text):,} 字符")
 
-        # 提取代币数据
-        tokens = []
-        for i, row in enumerate(token_rows[:limit], 1):
-            token_data = self._parse_token_row(row, i, chain)
-            if token_data:
-                tokens.append(token_data)
+                # 解析 HTML
+                soup = BeautifulSoup(response.text, 'html.parser')
+                token_rows = soup.select('a.ds-dex-table-row')
 
-        logger.info(f"成功提取 {len(tokens)} 个代币")
+                if not token_rows:
+                    logger.warning("未找到代币行")
+                    continue
 
-        return tokens
+                logger.info(f"找到 {len(token_rows)} 个代币行")
+
+                # 提取代币数据
+                tokens = []
+                for i, row in enumerate(token_rows[:limit], 1):
+                    token_data = self._parse_token_row(row, i, chain)
+                    if token_data:
+                        tokens.append(token_data)
+
+                logger.info(f"成功提取 {len(tokens)} 个代币")
+                return tokens
+
+            except Exception as e:
+                logger.error(f"请求失败 (尝试 {attempt + 1}/{max_retries + 1}): {e}")
+                if attempt == max_retries:
+                    logger.error(f"已达最大重试次数，放弃爬取 {chain}")
+                    return []
+                continue
+
+        # 所有重试都失败
+        logger.error(f"{chain} 链爬取失败")
+        return []
 
 
 # ==================== 便捷函数 ====================

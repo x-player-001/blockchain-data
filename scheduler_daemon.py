@@ -200,13 +200,14 @@ def shutdown_handler(signum, frame):
     logger.info("收到关闭信号，正在关闭调度器...")
 
     if scheduler:
-        scheduler.shutdown(wait=True)
-
-    if monitor_service:
-        asyncio.create_task(monitor_service.close())
+        try:
+            scheduler.shutdown(wait=False)  # 改为 wait=False，避免阻塞
+        except Exception as e:
+            logger.debug(f"关闭调度器时出错（可忽略）: {e}")
 
     logger.info("调度器已关闭")
-    sys.exit(0)
+    # 不要在这里调用 sys.exit()，让主函数自然退出
+    # sys.exit(0) 会导致 asyncio 抛出异常
 
 
 async def main():
@@ -314,12 +315,21 @@ async def main():
             await asyncio.sleep(60)
     except (KeyboardInterrupt, SystemExit):
         logger.info("接收到退出信号")
+    except Exception as e:
+        logger.error(f"运行时错误: {e}", exc_info=True)
     finally:
+        logger.info("正在关闭服务...")
         if scheduler:
-            scheduler.shutdown(wait=True)
+            try:
+                scheduler.shutdown(wait=False)
+            except:
+                pass
         if monitor_service:
-            await monitor_service.close()
-        logger.info("定时任务守护进程已关闭")
+            try:
+                await monitor_service.close()
+            except:
+                pass
+        logger.info("✅ 定时任务守护进程已安全关闭")
 
 
 if __name__ == "__main__":

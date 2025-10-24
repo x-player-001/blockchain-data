@@ -1,0 +1,17 @@
+[Unit]
+Description=Blockchain Data Scheduler Daemon
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=mac
+WorkingDirectory=/Users/mac/Documents/code/blockchain-data
+ExecStart=/usr/bin/python3 /Users/mac/Documents/code/blockchain-data/scheduler_daemon.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/blockchain-scheduler.log
+StandardError=append:/var/log/blockchain-scheduler-error.log
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

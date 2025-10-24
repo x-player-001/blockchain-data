@@ -197,17 +197,19 @@ def shutdown_handler(signum, frame):
     """
     优雅关闭处理
     """
+    global scheduler
     logger.info("收到关闭信号，正在关闭调度器...")
 
     if scheduler:
         try:
-            scheduler.shutdown(wait=False)  # 改为 wait=False，避免阻塞
-        except Exception as e:
-            logger.debug(f"关闭调度器时出错（可忽略）: {e}")
+            scheduler.shutdown(wait=False)
+            logger.info("调度器已关闭")
+        except Exception:
+            pass  # 忽略重复关闭的错误
 
-    logger.info("调度器已关闭")
-    # 不要在这里调用 sys.exit()，让主函数自然退出
-    # sys.exit(0) 会导致 asyncio 抛出异常
+    # 直接退出（避免程序卡死）
+    import os
+    os._exit(0)
 
 
 async def main():

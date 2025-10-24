@@ -75,7 +75,8 @@ class MultiChainScraper:
         self,
         chains: List[str] = ['bsc', 'solana'],
         count_per_chain: int = 100,
-        top_n_per_chain: int = 10
+        top_n_per_chain: int = 10,
+        use_undetected_chrome: bool = False
     ) -> Dict[str, Any]:
         """
         爬取多条链并保存到 potential_tokens 表
@@ -84,6 +85,7 @@ class MultiChainScraper:
             chains: 链列表，如 ['bsc', 'solana']
             count_per_chain: 每条链爬取多少个代币
             top_n_per_chain: 每条链取前N个
+            use_undetected_chrome: 是否使用 undetected-chromedriver（成功率更高）
 
         Returns:
             统计信息 {chain: {scraped, saved, skipped}}
@@ -106,7 +108,8 @@ class MultiChainScraper:
             chain_result = await self._scrape_and_save_chain(
                 chain=chain,
                 count=count_per_chain,
-                top_n=top_n_per_chain
+                top_n=top_n_per_chain,
+                use_undetected_chrome=use_undetected_chrome
             )
 
             results[chain] = chain_result
@@ -127,7 +130,8 @@ class MultiChainScraper:
         self,
         chain: str,
         count: int,
-        top_n: int
+        top_n: int,
+        use_undetected_chrome: bool = False
     ) -> Dict[str, Any]:
         """
         爬取单条链并保存
@@ -136,15 +140,22 @@ class MultiChainScraper:
             chain: 链名称
             count: 爬取数量
             top_n: 取前N个
+            use_undetected_chrome: 是否使用 undetected-chromedriver
 
         Returns:
             {scraped, saved, skipped}
         """
-        # 1. 爬取数据
-        tokens = self.dex_service.scrape_with_cloudscraper(
-            chain=chain,
-            limit=count
-        )
+        # 1. 爬取数据（根据参数选择方法）
+        if use_undetected_chrome:
+            tokens = self.dex_service.scrape_with_undetected_chrome(
+                chain=chain,
+                limit=count
+            )
+        else:
+            tokens = self.dex_service.scrape_with_cloudscraper(
+                chain=chain,
+                limit=count
+            )
 
         if not tokens:
             logger.warning(f"  {chain}: 未获取到数据")

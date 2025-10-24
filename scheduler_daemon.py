@@ -15,6 +15,7 @@ import asyncio
 import logging
 import signal
 import sys
+import os
 import random
 import argparse
 from datetime import datetime, timedelta
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 scheduler = None
 monitor_service = None
 enable_scraper = True  # 是否启用爬虫任务
+use_undetected_chrome = os.getenv('USE_UNDETECTED_CHROME', 'false').lower() == 'true'
 
 
 async def scrape_dexscreener_task():
@@ -63,7 +65,8 @@ async def scrape_dexscreener_task():
         result = await scraper.scrape_and_save_multi_chain(
             chains=['bsc', 'solana'],  # 爬取 BSC 和 Solana 链
             count_per_chain=100,       # 每条链爬取100个代币
-            top_n_per_chain=10         # 每条链取前10名涨幅榜
+            top_n_per_chain=10,        # 每条链取前10名涨幅榜
+            use_undetected_chrome=use_undetected_chrome  # 是否使用 undetected-chromedriver
         )
 
         logger.info(
@@ -233,6 +236,11 @@ async def main():
         action='store_true',
         help='只启动爬虫任务，不启动监控'
     )
+    parser.add_argument(
+        '--use-undetected-chrome',
+        action='store_true',
+        help='使用 undetected-chromedriver 爬取（成功率更高，需要安装 Chrome）'
+    )
 
     args = parser.parse_args()
 
@@ -245,8 +253,17 @@ async def main():
     enable_scraper = not args.monitor_only
     enable_monitor = not args.scraper_only
 
+    # 设置爬取方法
+    global use_undetected_chrome
+    if args.use_undetected_chrome:
+        use_undetected_chrome = True
+
     logger.info("="*80)
     logger.info("定时任务守护进程启动")
+    if use_undetected_chrome:
+        logger.info("爬取方法: undetected-chromedriver（高成功率模式）")
+    else:
+        logger.info("爬取方法: cloudscraper（快速模式）")
     logger.info("="*80)
 
     # 注册信号处理

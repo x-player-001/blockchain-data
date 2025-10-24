@@ -81,3 +81,4 @@ data/
 
 # Test files
 test_alert.py
+.env.copy

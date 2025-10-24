@@ -45,7 +45,7 @@ class AveApiService:
 
             if response.status_code == 200:
                 data = response.json()
-                logger.info(f"成功获取交易对详情: {pair_address[:10]}...")
+                # 不再打印每次成功，由调用方汇总
                 return data
             else:
                 logger.warning(f"获取交易对详情失败: {pair_address}, 状态码: {response.status_code}")

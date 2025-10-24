@@ -534,6 +534,7 @@ class TokenMonitorService:
 
                     session.add(token)
                     updated_count += 1
+                    # 不再打印每个代币的成功更新，最后汇总
 
                     # Check for price drop alert (using simple price data dict for compatibility)
                     price_data_dict = {
@@ -555,9 +556,14 @@ class TokenMonitorService:
 
             await session.commit()
 
-        logger.info(
-            f"Updated {updated_count} tokens using AVE API, triggered {alerts_triggered} alerts"
-        )
+        # 汇总成功日志
+        if updated_count > 0:
+            logger.info(
+                f"✅ 成功更新 {updated_count}/{len(monitored_tokens)} 个监控代币, "
+                f"触发报警 {alerts_triggered} 次"
+            )
+        else:
+            logger.info(f"未更新任何代币 (总共 {len(monitored_tokens)} 个)")
 
         return {
             "updated": updated_count,
@@ -1491,7 +1497,7 @@ class TokenMonitorService:
                     token.last_ave_update = datetime.utcnow()
                     await session.flush()
 
-                    logger.info(f"✅ Updated {token.token_symbol}")
+                    # 不再打印每个代币的成功更新，最后汇总
                     updated_count += 1
 
                     time.sleep(delay)
@@ -1501,7 +1507,14 @@ class TokenMonitorService:
                     failed_count += 1
                     time.sleep(delay)
 
-            logger.info(f"✅ Updated {updated_count} potential tokens, {failed_count} failed")
+            # 汇总成功日志
+            if updated_count > 0:
+                logger.info(
+                    f"✅ 成功更新 {updated_count}/{len(potential_tokens)} 个潜力代币 AVE 数据"
+                    + (f", {failed_count} 个失败" if failed_count > 0 else "")
+                )
+            else:
+                logger.info(f"未更新任何潜力代币 (总共 {len(potential_tokens)} 个, {failed_count} 个失败)")
 
             return {
                 "updated": updated_count,

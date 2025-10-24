@@ -273,17 +273,10 @@ class MultiChainScraper:
 
                 await session.flush()
 
-                logger.info(
-                    f"  🔄 {token_symbol}: {old_change:.1f}% → {price_change_24h:.1f}% "
-                    f"(+{price_change_24h - old_change:.1f}%)"
-                )
+                # 不再打印每个代币的更新信息，由调用方汇总
                 return True
             else:
                 # 涨幅未提高，跳过
-                logger.info(
-                    f"  ⏭️  {token_symbol}: 涨幅未提高 "
-                    f"({price_change_24h:.1f}% ≤ {old_change:.1f}%)"
-                )
                 return False
 
         # 不存在，创建新记录
@@ -311,5 +304,5 @@ class MultiChainScraper:
         session.add(potential_token)
         await session.flush()
 
-        logger.info(f"  ✅ {token_symbol}: +{price_change_24h:.1f}%")
+        # 不再打印每个代币的保存信息，由调用方汇总
         return True

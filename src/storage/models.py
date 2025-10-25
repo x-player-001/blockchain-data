@@ -442,6 +442,7 @@ class PotentialToken(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_ave_update = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
+    permanently_deleted = Column(Integer, nullable=False, default=0)  # 0=normal, 1=permanently deleted (不返回前端)
 
     # Indexes
     __table_args__ = (
@@ -569,6 +570,7 @@ class MonitoredToken(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     stopped_at = Column(DateTime, nullable=True)
     deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
+    permanently_deleted = Column(Integer, nullable=False, default=0)  # 0=normal, 1=permanently deleted (不返回前端)
 
     # Relationships
     alerts = relationship("PriceAlert", back_populates="monitored_token", cascade="all, delete-orphan")
@@ -636,3 +638,36 @@ class PriceAlert(Base):
 
     def __repr__(self):
         return f"<PriceAlert {self.alert_type} -{self.drop_from_peak_percent}% at {self.triggered_at}>"
+
+
+class ScraperConfig(Base):
+    """爬虫配置表 - 存储爬取参数配置"""
+
+    __tablename__ = "scraper_config"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # 爬取参数
+    top_n_per_chain = Column(Integer, nullable=False, default=10, comment="每条链取前N名代币")
+    count_per_chain = Column(Integer, nullable=False, default=100, comment="每条链爬取总数")
+    scrape_interval_min = Column(Integer, nullable=False, default=9, comment="爬取间隔最小值（分钟）")
+    scrape_interval_max = Column(Integer, nullable=False, default=15, comment="爬取间隔最大值（分钟）")
+
+    # 链配置
+    enabled_chains = Column(JSONB, nullable=False, default=['bsc', 'solana'], comment="启用的链列表")
+
+    # 爬取方法
+    use_undetected_chrome = Column(Integer, nullable=False, default=0, comment="是否使用undetected-chrome（0=否，1=是）")
+
+    # 其他配置
+    enabled = Column(Integer, nullable=False, default=1, comment="是否启用爬虫（0=禁用，1=启用）")
+
+    # 时间戳
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 备注
+    description = Column(String(500), nullable=True, comment="配置说明")
+
+    def __repr__(self):
+        return f"<ScraperConfig top_n={self.top_n_per_chain} interval={self.scrape_interval_min}-{self.scrape_interval_max}>"

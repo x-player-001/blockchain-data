@@ -55,7 +55,7 @@ class AveApiService:
             logger.error(f"AVE API调用异常: {pair_address}, 错误: {e}")
             return None
 
-    def parse_pair_data(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    def parse_pair_data(self, raw_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         解析AVE API返回的交易对数据
 
@@ -63,12 +63,17 @@ class AveApiService:
             raw_data: AVE API原始响应数据
 
         Returns:
-            解析后的结构化数据
+            解析后的结构化数据，如果 pair 不存在返回 None
         """
         if not raw_data or 'data' not in raw_data:
-            return {}
+            return None
 
         data = raw_data.get('data', {})
+
+        # 检查 data 是否为空（pair not found）
+        if not data or not data.get('pair'):
+            logger.warning("Pair not found or data is empty")
+            return None
 
         # 判断哪个是目标代币（使用target_token字段）
         target_token = data.get('target_token', '').lower()
@@ -87,11 +92,26 @@ class AveApiService:
             token_price_usd = data.get('token1_price_usd')
             quote_token_address = token0_address
 
+        # 根据target_token确定代币名称和符号
+        if target_token == token0_address:
+            token_symbol = data.get('token0_symbol')
+            token_name = data.get('token0_name') or data.get('token0_symbol')  # fallback to symbol
+            quote_token_symbol = data.get('token1_symbol')
+        else:
+            token_symbol = data.get('token1_symbol')
+            token_name = data.get('token1_name') or data.get('token1_symbol')  # fallback to symbol
+            quote_token_symbol = data.get('token0_symbol')
+
         # 提取基础信息
         parsed = {
             # Token地址
             'token_address': token_address,
             'quote_token_address': quote_token_address,
+
+            # Token信息
+            'token_symbol': token_symbol,
+            'token_name': token_name,
+            'quote_token_symbol': quote_token_symbol,
 
             # AMM类型
             'amm': data.get('amm'),  # cakev2, etc.

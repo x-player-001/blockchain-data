@@ -13,7 +13,7 @@ from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.storage.db_manager import DatabaseManager
-from src.storage.models import MonitoredToken, PriceAlert, DexScreenerToken, PotentialToken
+from src.storage.models import MonitoredToken, PriceAlert, DexScreenerToken, PotentialToken, ScraperConfig
 from src.services.dexscreener_service import DexScreenerService
 from src.services.ave_api_service import ave_api_service
 from src.utils.logger import setup_logger
@@ -700,8 +700,11 @@ class TokenMonitorService:
         await self._ensure_db()
 
         async with self.db_manager.get_session() as session:
-            # 默认排除已删除的代币
-            query = select(MonitoredToken).where(MonitoredToken.deleted_at.is_(None))
+            # 默认排除已删除和彻底删除的代币
+            query = select(MonitoredToken).where(
+                MonitoredToken.deleted_at.is_(None),
+                MonitoredToken.permanently_deleted == 0
+            )
 
             # Apply status filter if provided
             if status:
@@ -956,8 +959,11 @@ class TokenMonitorService:
         await self._ensure_db()
 
         async with self.db_manager.get_session() as session:
-            # 默认排除已删除的代币
-            query = select(PotentialToken).where(PotentialToken.deleted_at.is_(None))
+            # 默认排除已删除和彻底删除的代币
+            query = select(PotentialToken).where(
+                PotentialToken.deleted_at.is_(None),
+                PotentialToken.permanently_deleted == 0
+            )
 
             if only_not_added:
                 query = query.where(PotentialToken.is_added_to_monitoring == 0)
@@ -1213,8 +1219,10 @@ class TokenMonitorService:
         await self._ensure_db()
 
         async with self.db_manager.get_session() as session:
+            # 只返回软删除（deleted_at 不为空），但未彻底删除的代币
             query = select(PotentialToken).where(
-                PotentialToken.deleted_at.isnot(None)
+                PotentialToken.deleted_at.isnot(None),
+                PotentialToken.permanently_deleted == 0
             ).order_by(desc(PotentialToken.deleted_at)).limit(limit)
 
             result = await session.execute(query)
@@ -1302,8 +1310,10 @@ class TokenMonitorService:
         await self._ensure_db()
 
         async with self.db_manager.get_session() as session:
+            # 只返回软删除（deleted_at 不为空），但未彻底删除的代币
             query = select(MonitoredToken).where(
-                MonitoredToken.deleted_at.isnot(None)
+                MonitoredToken.deleted_at.isnot(None),
+                MonitoredToken.permanently_deleted == 0
             ).order_by(desc(MonitoredToken.deleted_at)).limit(limit)
 
             result = await session.execute(query)
@@ -1519,4 +1529,190 @@ class TokenMonitorService:
             return {
                 "updated": updated_count,
                 "failed": failed_count
+            }
+
+    async def get_scraper_config(self) -> Optional[Dict[str, Any]]:
+        """
+        获取爬虫配置
+
+        Returns:
+            配置字典，如果不存在则返回None
+        """
+        await self._ensure_db()
+
+        async with self.db_manager.get_session() as session:
+            try:
+                query = select(ScraperConfig).where(ScraperConfig.enabled == 1).limit(1)
+                result = await session.execute(query)
+                config = result.scalar_one_or_none()
+
+                if not config:
+                    logger.warning("未找到启用的爬虫配置")
+                    return None
+
+                return {
+                    "id": config.id,
+                    "top_n_per_chain": config.top_n_per_chain,
+                    "count_per_chain": config.count_per_chain,
+                    "scrape_interval_min": config.scrape_interval_min,
+                    "scrape_interval_max": config.scrape_interval_max,
+                    "enabled_chains": config.enabled_chains,  # JSONB field, already parsed as list
+                    "use_undetected_chrome": bool(config.use_undetected_chrome),
+                    "enabled": bool(config.enabled),
+                    "description": config.description
+                }
+
+            except Exception as e:
+                logger.error(f"获取爬虫配置失败: {e}")
+                return None
+
+    async def add_monitoring_by_pair(
+        self,
+        pair_address: str,
+        chain: str,
+        drop_threshold: float = 20.0,
+        alert_thresholds: Optional[List[float]] = None
+    ) -> dict:
+        """
+        通过 pair 地址手动添加监控代币
+
+        流程：
+        1. 调用 AVE API 获取 pair 详细信息
+        2. 提取代币信息并创建监控记录
+        """
+        from src.storage.models import MonitoredToken
+        from sqlalchemy import select
+        import uuid
+
+        # 1. 调用 AVE API 获取 pair 详情
+        pair_data = ave_api_service.get_pair_detail_parsed(pair_address, chain)
+        if not pair_data:
+            raise ValueError(f"无法获取 pair {pair_address} 的信息，请检查地址是否正确")
+
+        # 2. 提取代币信息
+        token_address = pair_data.get('token_address') or pair_address
+        token_symbol = pair_data.get('token_symbol') or 'Unknown'
+        token_name = pair_data.get('token_name') or 'Unknown'
+        current_price = float(pair_data.get('price_usd', 0))
+
+        if current_price <= 0:
+            raise ValueError("无法获取有效的代币价格")
+
+        await self._ensure_db()
+
+        # 3. 检查是否已存在监控
+        async with self.db_manager.get_session() as session:
+            result = await session.execute(
+                select(MonitoredToken).where(
+                    MonitoredToken.pair_address == pair_address,
+                    MonitoredToken.chain == chain,
+                    MonitoredToken.permanently_deleted == 0
+                )
+            )
+            existing = result.scalar_one_or_none()
+
+            if existing:
+                raise ValueError(f"该代币已在监控列表中（{existing.token_symbol}）")
+
+            # 4. 创建监控记录
+            monitored_token = MonitoredToken(
+                id=str(uuid.uuid4()),
+                token_address=token_address,
+                token_symbol=token_symbol,
+                token_name=token_name,
+                chain=chain,
+                dex_id='ave',
+                pair_address=pair_address,
+                amm=pair_data.get('amm'),
+                dex_type=pair_data.get('dex_type'),
+                entry_price_usd=current_price,
+                peak_price_usd=current_price,
+                current_price_usd=current_price,
+                drop_threshold_percent=drop_threshold,
+                alert_thresholds=alert_thresholds or [70, 80, 90],
+                status='active',
+                # 填充 AVE API 数据
+                current_tvl=float(pair_data.get('current_tvl', 0)) if pair_data.get('current_tvl') else None,
+                current_market_cap=float(pair_data.get('current_market_cap', 0)) if pair_data.get('current_market_cap') else None,
+                price_change_1m=float(pair_data.get('price_change_1m', 0)) if pair_data.get('price_change_1m') is not None else None,
+                price_change_5m=float(pair_data.get('price_change_5m', 0)) if pair_data.get('price_change_5m') is not None else None,
+                price_change_15m=float(pair_data.get('price_change_15m', 0)) if pair_data.get('price_change_15m') is not None else None,
+                price_change_30m=float(pair_data.get('price_change_30m', 0)) if pair_data.get('price_change_30m') is not None else None,
+                price_change_1h=float(pair_data.get('price_change_1h', 0)) if pair_data.get('price_change_1h') is not None else None,
+                price_change_4h=float(pair_data.get('price_change_4h', 0)) if pair_data.get('price_change_4h') is not None else None,
+                price_change_24h=float(pair_data.get('price_change_24h', 0)) if pair_data.get('price_change_24h') is not None else None,
+            )
+
+            session.add(monitored_token)
+            await session.commit()
+            await session.refresh(monitored_token)
+
+            logger.info(f"✅ 已添加到监控: {token_symbol} (pair: {pair_address[:10]}...)")
+
+            return {
+                "success": True,
+                "message": f"已添加 {token_symbol} 到监控列表",
+                "token_id": monitored_token.id,
+                "token_symbol": token_symbol,
+                "entry_price": current_price
+            }
+
+    async def permanently_delete_monitored_token(self, token_id: str) -> dict:
+        """
+        彻底删除监控代币（设置 permanently_deleted=1）
+        """
+        from src.storage.models import MonitoredToken
+        from sqlalchemy import select
+        from datetime import datetime
+
+        await self._ensure_db()
+
+        async with self.db_manager.get_session() as session:
+            result = await session.execute(
+                select(MonitoredToken).where(MonitoredToken.id == token_id)
+            )
+            token = result.scalar_one_or_none()
+
+            if not token:
+                raise ValueError(f"未找到ID为 {token_id} 的监控代币")
+
+            token.permanently_deleted = 1
+            token.deleted_at = datetime.utcnow()
+            await session.commit()
+
+            logger.info(f"🗑️ 彻底删除监控代币: {token.token_symbol}")
+
+            return {
+                "success": True,
+                "message": f"已彻底删除 {token.token_symbol}"
+            }
+
+    async def permanently_delete_potential_token(self, token_id: str) -> dict:
+        """
+        彻底删除潜力代币（设置 permanently_deleted=1）
+        """
+        from src.storage.models import PotentialToken
+        from sqlalchemy import select
+        from datetime import datetime
+
+        await self._ensure_db()
+
+        async with self.db_manager.get_session() as session:
+            result = await session.execute(
+                select(PotentialToken).where(PotentialToken.id == token_id)
+            )
+            token = result.scalar_one_or_none()
+
+            if not token:
+                raise ValueError(f"未找到ID为 {token_id} 的潜力代币")
+
+            token.permanently_deleted = 1
+            token.deleted_at = datetime.utcnow()
+            await session.commit()
+
+            logger.info(f"🗑️ 彻底删除潜力代币: {token.token_symbol}")
+
+            return {
+                "success": True,
+                "message": f"已彻底删除 {token.token_symbol}"
             }

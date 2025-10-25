@@ -46,8 +46,8 @@ use_undetected_chrome = os.getenv('USE_UNDETECTED_CHROME', 'false').lower() == '
 
 async def scrape_dexscreener_task():
     """
-    爬取 DexScreener 首页任务（随机间隔9-15分钟）
-    使用 cloudscraper 爬取 BSC 和 Solana 链
+    爬取 DexScreener 首页任务（从数据库读取配置）
+    使用 cloudscraper 或 undetected-chromedriver 爬取多链数据
     支持重试机制提高成功率
     """
     scraper = None
@@ -58,15 +58,42 @@ async def scrape_dexscreener_task():
         logger.info("开始爬取 DexScreener 首页（多链）...")
         logger.info("="*80)
 
-        # 使用新的多链爬虫
+        # 1. 从数据库读取配置
+        monitor_service = TokenMonitorService()
+        config = await monitor_service.get_scraper_config()
+
+        if not config:
+            logger.error("未找到爬虫配置，使用默认配置")
+            config = {
+                'enabled_chains': ['bsc', 'solana'],
+                'count_per_chain': 100,
+                'top_n_per_chain': 10,
+                'use_undetected_chrome': use_undetected_chrome,
+                'enabled': True,
+                'scrape_interval_min': 9,
+                'scrape_interval_max': 15
+            }
+
+        # 2. 检查配置是否启用
+        if not config.get('enabled', True):
+            logger.info("爬虫配置已禁用，跳过本次爬取")
+            schedule_next_scrape(config)
+            return
+
+        logger.info(f"配置信息: chains={config['enabled_chains']}, "
+                   f"count_per_chain={config['count_per_chain']}, "
+                   f"top_n_per_chain={config['top_n_per_chain']}, "
+                   f"use_undetected_chrome={config['use_undetected_chrome']}")
+
+        # 3. 使用配置参数爬取
         scraper = MultiChainScraper()
 
         # 爬取并保存到 potential_tokens 表
         result = await scraper.scrape_and_save_multi_chain(
-            chains=['bsc', 'solana'],  # 爬取 BSC 和 Solana 链
-            count_per_chain=100,       # 每条链爬取100个代币
-            top_n_per_chain=10,        # 每条链取前10名涨幅榜
-            use_undetected_chrome=use_undetected_chrome  # 是否使用 undetected-chromedriver
+            chains=config['enabled_chains'],              # 从配置读取链列表
+            count_per_chain=config['count_per_chain'],    # 从配置读取每条链爬取总数
+            top_n_per_chain=config['top_n_per_chain'],    # 从配置读取每条链取前N名
+            use_undetected_chrome=config['use_undetected_chrome']  # 从配置读取爬取方法
         )
 
         logger.info(
@@ -81,7 +108,9 @@ async def scrape_dexscreener_task():
             logger.info("更新潜力代币的 AVE API 数据...")
             logger.info("="*80)
 
-            monitor_service = TokenMonitorService()
+            if not monitor_service:
+                monitor_service = TokenMonitorService()
+
             update_result = await monitor_service.update_potential_tokens_data(
                 delay=0.3,
                 min_update_interval_minutes=0  # 爬取后立即更新，不检查间隔
@@ -93,12 +122,12 @@ async def scrape_dexscreener_task():
             )
             logger.info("="*80)
 
-        # 调度下一次爬取任务（随机间隔9-15分钟）
-        schedule_next_scrape()
+        # 调度下一次爬取任务（使用配置的间隔时间）
+        schedule_next_scrape(config)
 
     except Exception as e:
         logger.error(f"爬取任务失败: {e}", exc_info=True)
-        # 即使失败也要调度下一次
+        # 即使失败也要调度下一次（使用默认配置）
         schedule_next_scrape()
 
     finally:
@@ -109,9 +138,12 @@ async def scrape_dexscreener_task():
             await monitor_service.close()
 
 
-def schedule_next_scrape():
+def schedule_next_scrape(config=None):
     """
-    调度下一次爬取任务（随机间隔9-15分钟）
+    调度下一次爬取任务（使用配置的间隔时间或默认9-15分钟）
+
+    Args:
+        config: 爬虫配置字典，包含 scrape_interval_min 和 scrape_interval_max
     """
     global scheduler, enable_scraper
 
@@ -120,8 +152,16 @@ def schedule_next_scrape():
         return
 
     if scheduler:
-        # 计算随机间隔时间（9-15分钟）
-        next_run_minutes = random.uniform(9, 15)
+        # 从配置读取间隔时间，如果没有配置则使用默认值（9-15分钟）
+        if config:
+            interval_min = config.get('scrape_interval_min', 9)
+            interval_max = config.get('scrape_interval_max', 15)
+        else:
+            interval_min = 9
+            interval_max = 15
+
+        # 计算随机间隔时间
+        next_run_minutes = random.uniform(interval_min, interval_max)
         next_run_time = datetime.now() + timedelta(minutes=next_run_minutes)
 
         # 移除旧的爬取任务

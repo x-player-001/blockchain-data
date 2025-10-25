@@ -3,7 +3,7 @@ FastAPI application for blockchain data service.
 Provides REST API endpoints for querying token and market data.
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 from datetime import datetime
@@ -899,16 +899,16 @@ async def get_scraper_config():
 
 @app.put("/api/scraper/config")
 async def update_scraper_config(
-    top_n_per_chain: Optional[int] = Query(None, ge=1, le=50),
-    count_per_chain: Optional[int] = Query(None, ge=10, le=500),
-    scrape_interval_min: Optional[int] = Query(None, ge=1, le=60),
-    scrape_interval_max: Optional[int] = Query(None, ge=1, le=120),
-    enabled_chains: Optional[str] = Query(None),
-    use_undetected_chrome: Optional[int] = Query(None, ge=0, le=1),
-    enabled: Optional[int] = Query(None, ge=0, le=1),
-    description: Optional[str] = Query(None)
+    top_n_per_chain: Optional[int] = Body(None, ge=1, le=50),
+    count_per_chain: Optional[int] = Body(None, ge=10, le=500),
+    scrape_interval_min: Optional[int] = Body(None, ge=1, le=60),
+    scrape_interval_max: Optional[int] = Body(None, ge=1, le=120),
+    enabled_chains: Optional[List[str]] = Body(None),
+    use_undetected_chrome: Optional[int] = Body(None, ge=0, le=1),
+    enabled: Optional[int] = Body(None, ge=0, le=1),
+    description: Optional[str] = Body(None)
 ):
-    """更新爬虫配置"""
+    """更新爬虫配置（接收 JSON body）"""
     from src.storage.models import ScraperConfig
     from src.storage.db_manager import DatabaseManager
     from sqlalchemy import select
@@ -937,7 +937,7 @@ async def update_scraper_config(
             if scrape_interval_max is not None:
                 config.scrape_interval_max = scrape_interval_max
             if enabled_chains is not None:
-                config.enabled_chains = [c.strip() for c in enabled_chains.split(',')]
+                config.enabled_chains = enabled_chains
             if use_undetected_chrome is not None:
                 config.use_undetected_chrome = use_undetected_chrome
             if enabled is not None:

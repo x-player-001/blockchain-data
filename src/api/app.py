@@ -853,3 +853,174 @@ async def restore_monitored_token(monitored_token_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         await monitor_service.close()
+
+
+# ==================== 爬虫配置 API ====================
+
+@app.get("/api/scraper/config")
+async def get_scraper_config():
+    """获取爬虫配置"""
+    from src.storage.models import ScraperConfig
+    from src.storage.db_manager import DatabaseManager
+    from sqlalchemy import select
+
+    db = DatabaseManager()
+    try:
+        async with db.get_session() as session:
+            result = await session.execute(select(ScraperConfig).limit(1))
+            config = result.scalar_one_or_none()
+
+            if not config:
+                return {
+                    "top_n_per_chain": 10,
+                    "count_per_chain": 100,
+                    "scrape_interval_min": 9,
+                    "scrape_interval_max": 15,
+                    "enabled_chains": ["bsc", "solana"],
+                    "use_undetected_chrome": 0,
+                    "enabled": 1
+                }
+
+            return {
+                "id": config.id,
+                "top_n_per_chain": config.top_n_per_chain,
+                "count_per_chain": config.count_per_chain,
+                "scrape_interval_min": config.scrape_interval_min,
+                "scrape_interval_max": config.scrape_interval_max,
+                "enabled_chains": config.enabled_chains,
+                "use_undetected_chrome": config.use_undetected_chrome,
+                "enabled": config.enabled,
+                "description": config.description
+            }
+    except Exception as e:
+        logger.error(f"Error getting scraper config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/scraper/config")
+async def update_scraper_config(
+    top_n_per_chain: Optional[int] = Query(None, ge=1, le=50),
+    count_per_chain: Optional[int] = Query(None, ge=10, le=500),
+    scrape_interval_min: Optional[int] = Query(None, ge=1, le=60),
+    scrape_interval_max: Optional[int] = Query(None, ge=1, le=120),
+    enabled_chains: Optional[str] = Query(None),
+    use_undetected_chrome: Optional[int] = Query(None, ge=0, le=1),
+    enabled: Optional[int] = Query(None, ge=0, le=1),
+    description: Optional[str] = Query(None)
+):
+    """更新爬虫配置"""
+    from src.storage.models import ScraperConfig
+    from src.storage.db_manager import DatabaseManager
+    from sqlalchemy import select
+    from datetime import datetime
+    import uuid
+
+    if scrape_interval_min and scrape_interval_max and scrape_interval_min > scrape_interval_max:
+        raise HTTPException(status_code=400, detail="最小间隔不能大于最大间隔")
+
+    db = DatabaseManager()
+    try:
+        async with db.get_session() as session:
+            result = await session.execute(select(ScraperConfig).limit(1))
+            config = result.scalar_one_or_none()
+
+            if not config:
+                config = ScraperConfig(id=str(uuid.uuid4()))
+                session.add(config)
+
+            if top_n_per_chain is not None:
+                config.top_n_per_chain = top_n_per_chain
+            if count_per_chain is not None:
+                config.count_per_chain = count_per_chain
+            if scrape_interval_min is not None:
+                config.scrape_interval_min = scrape_interval_min
+            if scrape_interval_max is not None:
+                config.scrape_interval_max = scrape_interval_max
+            if enabled_chains is not None:
+                config.enabled_chains = [c.strip() for c in enabled_chains.split(',')]
+            if use_undetected_chrome is not None:
+                config.use_undetected_chrome = use_undetected_chrome
+            if enabled is not None:
+                config.enabled = enabled
+            if description is not None:
+                config.description = description
+
+            config.updated_at = datetime.utcnow()
+            await session.commit()
+            await session.refresh(config)
+
+            return {"success": True, "message": "配置已更新"}
+    except Exception as e:
+        logger.error(f"Error updating scraper config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/monitor/add-by-pair")
+async def add_monitoring_by_pair_address(
+    pair_address: str = Query(...),
+    chain: str = Query("bsc"),
+    drop_threshold: float = Query(20.0, ge=0, le=100),
+    alert_thresholds: Optional[str] = Query(None)
+):
+    """通过 pair 地址手动添加监控代币"""
+    from src.services.token_monitor_service import TokenMonitorService
+
+    custom_thresholds = None
+    if alert_thresholds:
+        try:
+            custom_thresholds = [float(t.strip()) for t in alert_thresholds.split(',')]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="阈值格式错误")
+
+    monitor_service = TokenMonitorService()
+    try:
+        result = await monitor_service.add_monitoring_by_pair(
+            pair_address=pair_address,
+            chain=chain,
+            drop_threshold=drop_threshold,
+            alert_thresholds=custom_thresholds
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error adding monitoring by pair: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await monitor_service.close()
+
+
+@app.delete("/api/monitor/tokens/{token_id}/permanent")
+async def permanently_delete_monitored_token(token_id: str):
+    """彻底删除监控代币（permanently_deleted=1）"""
+    from src.services.token_monitor_service import TokenMonitorService
+
+    monitor_service = TokenMonitorService()
+    try:
+        result = await monitor_service.permanently_delete_monitored_token(token_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error permanently deleting monitored token: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await monitor_service.close()
+
+
+@app.delete("/api/potential-tokens/{token_id}/permanent")
+async def permanently_delete_potential_token(token_id: str):
+    """彻底删除潜力代币（permanently_deleted=1）"""
+    from src.services.token_monitor_service import TokenMonitorService
+
+    monitor_service = TokenMonitorService()
+    try:
+        result = await monitor_service.permanently_delete_potential_token(token_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error permanently deleting potential token: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        await monitor_service.close()

@@ -1587,16 +1587,27 @@ class TokenMonitorService:
         # 1. 调用 AVE API 获取 pair 详情
         pair_data = ave_api_service.get_pair_detail_parsed(pair_address, chain)
         if not pair_data:
-            raise ValueError(f"无法获取 pair {pair_address} 的信息，请检查地址是否正确")
+            raise ValueError(
+                f"无法找到 pair: {pair_address} (链: {chain})。"
+                f"可能原因：1) pair 地址不正确 2) AVE API 暂未收录该 pair 3) 链名称错误"
+            )
 
         # 2. 提取代币信息
         token_address = pair_data.get('token_address') or pair_address
         token_symbol = pair_data.get('token_symbol') or 'Unknown'
         token_name = pair_data.get('token_name') or 'Unknown'
-        current_price = float(pair_data.get('price_usd', 0))
 
+        # 安全获取价格（可能为 None）
+        price_value = pair_data.get('current_price_usd')
+        if price_value is None:
+            raise ValueError(
+                f"无法获取 pair {pair_address} 的价格信息。"
+                f"pair 数据可能不完整或 AVE API 数据异常。"
+            )
+
+        current_price = float(price_value)
         if current_price <= 0:
-            raise ValueError("无法获取有效的代币价格")
+            raise ValueError(f"获取到的代币价格无效: {current_price}")
 
         await self._ensure_db()
 
@@ -1615,6 +1626,15 @@ class TokenMonitorService:
                 raise ValueError(f"该代币已在监控列表中（{existing.token_symbol}）")
 
             # 4. 创建监控记录
+            # 辅助函数：安全转换Decimal
+            def safe_decimal(value):
+                if value is None:
+                    return None
+                try:
+                    return float(value) if isinstance(value, (int, float, Decimal)) else float(value)
+                except:
+                    return None
+
             monitored_token = MonitoredToken(
                 id=str(uuid.uuid4()),
                 token_address=token_address,
@@ -1631,16 +1651,69 @@ class TokenMonitorService:
                 drop_threshold_percent=drop_threshold,
                 alert_thresholds=alert_thresholds or [70, 80, 90],
                 status='active',
-                # 填充 AVE API 数据
-                current_tvl=float(pair_data.get('current_tvl', 0)) if pair_data.get('current_tvl') else None,
-                current_market_cap=float(pair_data.get('current_market_cap', 0)) if pair_data.get('current_market_cap') else None,
-                price_change_1m=float(pair_data.get('price_change_1m', 0)) if pair_data.get('price_change_1m') is not None else None,
-                price_change_5m=float(pair_data.get('price_change_5m', 0)) if pair_data.get('price_change_5m') is not None else None,
-                price_change_15m=float(pair_data.get('price_change_15m', 0)) if pair_data.get('price_change_15m') is not None else None,
-                price_change_30m=float(pair_data.get('price_change_30m', 0)) if pair_data.get('price_change_30m') is not None else None,
-                price_change_1h=float(pair_data.get('price_change_1h', 0)) if pair_data.get('price_change_1h') is not None else None,
-                price_change_4h=float(pair_data.get('price_change_4h', 0)) if pair_data.get('price_change_4h') is not None else None,
-                price_change_24h=float(pair_data.get('price_change_24h', 0)) if pair_data.get('price_change_24h') is not None else None,
+
+                # 历史最高价（ATH）
+                price_ath_usd=safe_decimal(pair_data.get('price_ath_usd')),
+
+                # 市场数据
+                current_tvl=safe_decimal(pair_data.get('current_tvl')),
+                current_market_cap=safe_decimal(pair_data.get('current_market_cap')),
+
+                # 价格变化（多时间段）
+                price_change_1m=safe_decimal(pair_data.get('price_change_1m')),
+                price_change_5m=safe_decimal(pair_data.get('price_change_5m')),
+                price_change_15m=safe_decimal(pair_data.get('price_change_15m')),
+                price_change_30m=safe_decimal(pair_data.get('price_change_30m')),
+                price_change_1h=safe_decimal(pair_data.get('price_change_1h')),
+                price_change_4h=safe_decimal(pair_data.get('price_change_4h')),
+                price_change_24h=safe_decimal(pair_data.get('price_change_24h')),
+
+                # 交易量（多时间段）
+                volume_1m=safe_decimal(pair_data.get('volume_1m')),
+                volume_5m=safe_decimal(pair_data.get('volume_5m')),
+                volume_15m=safe_decimal(pair_data.get('volume_15m')),
+                volume_30m=safe_decimal(pair_data.get('volume_30m')),
+                volume_1h=safe_decimal(pair_data.get('volume_1h')),
+                volume_4h=safe_decimal(pair_data.get('volume_4h')),
+                volume_24h=safe_decimal(pair_data.get('volume_24h')),
+
+                # 交易次数（多时间段）
+                tx_count_1m=pair_data.get('tx_count_1m'),
+                tx_count_5m=pair_data.get('tx_count_5m'),
+                tx_count_15m=pair_data.get('tx_count_15m'),
+                tx_count_30m=pair_data.get('tx_count_30m'),
+                tx_count_1h=pair_data.get('tx_count_1h'),
+                tx_count_4h=pair_data.get('tx_count_4h'),
+                tx_count_24h=pair_data.get('tx_count_24h'),
+
+                # 买卖数据
+                buys_24h=pair_data.get('buys_24h'),
+                sells_24h=pair_data.get('sells_24h'),
+
+                # 交易者数据
+                makers_24h=pair_data.get('makers_24h'),
+                buyers_24h=pair_data.get('buyers_24h'),
+                sellers_24h=pair_data.get('sellers_24h'),
+
+                # 24小时价格范围
+                price_24h_high=safe_decimal(pair_data.get('price_24h_high')),
+                price_24h_low=safe_decimal(pair_data.get('price_24h_low')),
+                open_price_24h=safe_decimal(pair_data.get('open_price_24h')),
+
+                # LP信息
+                lp_holders=pair_data.get('lp_holders'),
+                lp_locked_percent=safe_decimal(pair_data.get('lp_locked_percent')),
+                lp_lock_platform=pair_data.get('lp_lock_platform'),
+
+                # 安全指标
+                rusher_tx_count=pair_data.get('rusher_tx_count'),
+                sniper_tx_count=pair_data.get('sniper_tx_count'),
+
+                # Token创建信息
+                token_created_at=pair_data.get('token_created_at'),
+                first_trade_at=pair_data.get('first_trade_at'),
+                creation_block_number=pair_data.get('creation_block_number'),
+                creation_tx_hash=pair_data.get('creation_tx_hash'),
             )
 
             session.add(monitored_token)

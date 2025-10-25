@@ -957,20 +957,21 @@ async def update_scraper_config(
 
 @app.post("/api/monitor/add-by-pair")
 async def add_monitoring_by_pair_address(
-    pair_address: str = Query(...),
-    chain: str = Query("bsc"),
-    drop_threshold: float = Query(20.0, ge=0, le=100),
-    alert_thresholds: Optional[str] = Query(None)
+    pair_address: str = Body(...),
+    chain: str = Body("bsc"),
+    drop_threshold: float = Body(20.0, ge=0, le=100),
+    alert_thresholds: Optional[str] = Body(None)
 ):
-    """通过 pair 地址手动添加监控代币"""
+    """通过 pair 地址手动添加监控代币（接收 JSON body）"""
     from src.services.token_monitor_service import TokenMonitorService
 
+    # 解析 alert_thresholds（支持逗号分隔字符串）
     custom_thresholds = None
     if alert_thresholds:
         try:
             custom_thresholds = [float(t.strip()) for t in alert_thresholds.split(',')]
-        except ValueError:
-            raise HTTPException(status_code=400, detail="阈值格式错误")
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail="阈值格式错误，应为逗号分隔的数字，如 '70,80,90'")
 
     monitor_service = TokenMonitorService()
     try:

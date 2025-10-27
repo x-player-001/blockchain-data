@@ -76,7 +76,10 @@ class MultiChainScraper:
         chains: List[str] = ['bsc', 'solana'],
         count_per_chain: int = 100,
         top_n_per_chain: int = 10,
-        use_undetected_chrome: bool = False
+        use_undetected_chrome: bool = False,
+        min_market_cap: Optional[float] = None,
+        min_liquidity: Optional[float] = None,
+        max_token_age_days: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         爬取多条链并保存到 potential_tokens 表
@@ -86,6 +89,9 @@ class MultiChainScraper:
             count_per_chain: 每条链爬取多少个代币
             top_n_per_chain: 每条链取前N个
             use_undetected_chrome: 是否使用 undetected-chromedriver（成功率更高）
+            min_market_cap: 最小市值（美元），低于此值的代币将被过滤
+            min_liquidity: 最小流动性（美元），低于此值的代币将被过滤
+            max_token_age_days: 最大代币年龄（天），超过此值的代币将被过滤
 
         Returns:
             统计信息 {chain: {scraped, saved, skipped}}
@@ -109,7 +115,10 @@ class MultiChainScraper:
                 chain=chain,
                 count=count_per_chain,
                 top_n=top_n_per_chain,
-                use_undetected_chrome=use_undetected_chrome
+                use_undetected_chrome=use_undetected_chrome,
+                min_market_cap=min_market_cap,
+                min_liquidity=min_liquidity,
+                max_token_age_days=max_token_age_days
             )
 
             results[chain] = chain_result
@@ -131,7 +140,10 @@ class MultiChainScraper:
         chain: str,
         count: int,
         top_n: int,
-        use_undetected_chrome: bool = False
+        use_undetected_chrome: bool = False,
+        min_market_cap: Optional[float] = None,
+        min_liquidity: Optional[float] = None,
+        max_token_age_days: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         爬取单条链并保存
@@ -141,9 +153,12 @@ class MultiChainScraper:
             count: 爬取数量
             top_n: 取前N个
             use_undetected_chrome: 是否使用 undetected-chromedriver
+            min_market_cap: 最小市值筛选
+            min_liquidity: 最小流动性筛选
+            max_token_age_days: 最大代币年龄筛选
 
         Returns:
-            {scraped, saved, skipped}
+            {scraped, saved, skipped, filtered}
         """
         # 1. 爬取数据（根据参数选择方法）
         if use_undetected_chrome:
@@ -171,9 +186,49 @@ class MultiChainScraper:
 
         logger.info(f"  ✓ 其中 {len(tokens_with_change)} 个有24h涨幅数据")
 
+        # 2.5. 按配置筛选代币（市值、流动性、年龄）
+        filtered_tokens = tokens_with_change
+        filtered_count = 0
+
+        if min_market_cap is not None or min_liquidity is not None or max_token_age_days is not None:
+            logger.info(f"  🔍 应用筛选条件:")
+            if min_market_cap:
+                logger.info(f"      市值 >= ${min_market_cap:,.0f}")
+            if min_liquidity:
+                logger.info(f"      流动性 >= ${min_liquidity:,.0f}")
+            if max_token_age_days:
+                logger.info(f"      代币年龄 <= {max_token_age_days} 天")
+
+            filtered_tokens = []
+            for token in tokens_with_change:
+                # 检查市值
+                if min_market_cap is not None:
+                    market_cap = token.get('market_cap')
+                    if market_cap is None or market_cap < min_market_cap:
+                        filtered_count += 1
+                        continue
+
+                # 检查流动性
+                if min_liquidity is not None:
+                    liquidity = token.get('liquidity_usd')
+                    if liquidity is None or liquidity < min_liquidity:
+                        filtered_count += 1
+                        continue
+
+                # 检查代币年龄
+                if max_token_age_days is not None:
+                    age_days = token.get('age_days')
+                    if age_days is None or age_days > max_token_age_days:
+                        filtered_count += 1
+                        continue
+
+                filtered_tokens.append(token)
+
+            logger.info(f"  ✓ 筛选后剩余 {len(filtered_tokens)} 个代币（过滤掉 {filtered_count} 个）")
+
         # 3. 按24h涨幅排序取前N
         sorted_tokens = sorted(
-            tokens_with_change,
+            filtered_tokens,
             key=lambda x: x.get('price_change_24h', 0),
             reverse=True
         )
@@ -227,7 +282,8 @@ class MultiChainScraper:
         return {
             "scraped": len(tokens),
             "saved": saved_count,
-            "skipped": skipped_count
+            "skipped": skipped_count,
+            "filtered": filtered_count
         }
 
     async def _save_or_update_token(

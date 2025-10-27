@@ -1841,7 +1841,11 @@ class TokenMonitorService:
                     "enabled_chains": config.enabled_chains,  # JSONB field, already parsed as list
                     "use_undetected_chrome": bool(config.use_undetected_chrome),
                     "enabled": bool(config.enabled),
-                    "description": config.description
+                    "description": config.description,
+                    # 筛选条件
+                    "min_market_cap": float(config.min_market_cap) if config.min_market_cap else None,
+                    "min_liquidity": float(config.min_liquidity) if config.min_liquidity else None,
+                    "max_token_age_days": config.max_token_age_days
                 }
 
             except Exception as e:

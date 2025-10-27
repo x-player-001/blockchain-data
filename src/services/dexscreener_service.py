@@ -1291,6 +1291,27 @@ class DexScreenerService:
                     except:
                         pass
 
+            # 提取 age（年龄字段，格式：21h, 5d, 2m）
+            import re
+            for part in parts:
+                # 匹配格式：数字 + 单位 (h=小时, d=天, m=月, y=年)
+                age_match = re.match(r'^(\d+)([hdmy])$', part.strip())
+                if age_match:
+                    value = int(age_match.group(1))
+                    unit = age_match.group(2)
+                    token_data['age'] = part.strip()
+
+                    # 转换为天数
+                    if unit == 'h':  # 小时
+                        token_data['age_days'] = value / 24.0
+                    elif unit == 'd':  # 天
+                        token_data['age_days'] = float(value)
+                    elif unit == 'm':  # 月
+                        token_data['age_days'] = value * 30.0
+                    elif unit == 'y':  # 年
+                        token_data['age_days'] = value * 365.0
+                    break
+
         except Exception as e:
             logger.debug(f"解析第 {rank} 行时出错: {e}")
 

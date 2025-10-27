@@ -118,7 +118,10 @@ async def scrape_dexscreener_task():
             chains=config['enabled_chains'],              # 从配置读取链列表
             count_per_chain=config['count_per_chain'],    # 从配置读取每条链爬取总数
             top_n_per_chain=config['top_n_per_chain'],    # 从配置读取每条链取前N名
-            use_undetected_chrome=config['use_undetected_chrome']  # 从配置读取爬取方法
+            use_undetected_chrome=config['use_undetected_chrome'],  # 从配置读取爬取方法
+            min_market_cap=config.get('min_market_cap'),  # 从配置读取最小市值
+            min_liquidity=config.get('min_liquidity'),    # 从配置读取最小流动性
+            max_token_age_days=config.get('max_token_age_days')  # 从配置读取最大代币年龄
         )
 
         # 3.5 更新 ScrapeLog 记录（状态：success）

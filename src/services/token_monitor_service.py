@@ -658,31 +658,26 @@ class TokenMonitorService:
                     if await self._check_and_trigger_alert(session, token, price_data_dict):
                         alerts_triggered += 1
 
-                    # Check if token should be auto-removed based on thresholds
-                    should_remove = False
-                    removal_reason = None
-                    removal_threshold = None
-
-                    if min_market_cap is not None and token.current_market_cap is not None:
-                        if float(token.current_market_cap) < min_market_cap:
-                            should_remove = True
-                            removal_reason = "low_market_cap"
-                            removal_threshold = float(token.current_market_cap)
-                            removed_by_market_cap += 1
-
-                    if not should_remove and min_liquidity is not None and token.current_tvl is not None:
-                        if float(token.current_tvl) < min_liquidity:
-                            should_remove = True
-                            removal_reason = "low_liquidity"
-                            removal_threshold = float(token.current_tvl)
-                            removed_by_liquidity += 1
+                    # 使用通用方法检查是否需要删除
+                    should_remove, removal_reason, removal_threshold = self._check_and_remove_by_thresholds(
+                        token, min_market_cap, min_liquidity
+                    )
 
                     if should_remove:
+                        # 标记删除
                         token.permanently_deleted = 1
                         token.removal_reason = removal_reason
                         token.removal_threshold_value = removal_threshold
                         token.deleted_at = datetime.utcnow()
                         removed_count += 1
+
+                        # 统计分类
+                        if removal_reason == "low_market_cap":
+                            removed_by_market_cap += 1
+                        elif removal_reason == "low_liquidity":
+                            removed_by_liquidity += 1
+
+                        # 日志
                         logger.warning(
                             f"🗑️ Auto-removed {token.token_symbol}: {removal_reason} "
                             f"(value: {removal_threshold:.2f}, threshold: "
@@ -721,6 +716,43 @@ class TokenMonitorService:
             "removed_by_market_cap": removed_by_market_cap,
             "removed_by_liquidity": removed_by_liquidity
         }
+
+    def _check_and_remove_by_thresholds(
+        self,
+        token,
+        min_market_cap: Optional[float],
+        min_liquidity: Optional[float]
+    ) -> tuple[bool, Optional[str], Optional[float]]:
+        """
+        检查代币是否应该被删除（通用筛选逻辑）
+
+        Args:
+            token: MonitoredToken 或 PotentialToken 对象
+            min_market_cap: 最小市值阈值（美元）
+            min_liquidity: 最小流动性阈值（美元）
+
+        Returns:
+            (should_remove, removal_reason, removal_threshold_value)
+        """
+        should_remove = False
+        removal_reason = None
+        removal_threshold = None
+
+        # 检查市值阈值
+        if min_market_cap is not None and token.current_market_cap is not None:
+            if float(token.current_market_cap) < min_market_cap:
+                should_remove = True
+                removal_reason = "low_market_cap"
+                removal_threshold = float(token.current_market_cap)
+
+        # 检查流动性阈值（只有在未被市值筛掉的情况下才检查）
+        if not should_remove and min_liquidity is not None and token.current_tvl is not None:
+            if float(token.current_tvl) < min_liquidity:
+                should_remove = True
+                removal_reason = "low_liquidity"
+                removal_threshold = float(token.current_tvl)
+
+        return should_remove, removal_reason, removal_threshold
 
     async def _check_and_trigger_alert(
         self,
@@ -1526,6 +1558,22 @@ class TokenMonitorService:
         """
         await self._ensure_db()
 
+        # 加载监控配置（用于筛选阈值）
+        monitor_config = None
+        async with self.db_manager.get_session() as session:
+            config_result = await session.execute(
+                select(MonitorConfig).limit(1)
+            )
+            monitor_config = config_result.scalar_one_or_none()
+
+        min_market_cap = None
+        min_liquidity = None
+        if monitor_config:
+            min_market_cap = float(monitor_config.min_monitor_market_cap) if monitor_config.min_monitor_market_cap else None
+            min_liquidity = float(monitor_config.min_monitor_liquidity) if monitor_config.min_monitor_liquidity else None
+            if min_market_cap or min_liquidity:
+                logger.info(f"潜力代币筛选阈值: 市值 >= {min_market_cap}, 流动性 >= {min_liquidity}")
+
         # 检查是否需要跳过本次更新（避免重复调用）
         async with self.db_manager.get_session() as session:
             # 查询最近更新的潜力代币
@@ -1550,6 +1598,9 @@ class TokenMonitorService:
 
         updated_count = 0
         failed_count = 0
+        removed_count = 0
+        removed_by_market_cap = 0
+        removed_by_liquidity = 0
         import time
 
         # 在同一个 session 中查询和更新
@@ -1558,7 +1609,8 @@ class TokenMonitorService:
             result = await session.execute(
                 select(PotentialToken).where(
                     PotentialToken.is_added_to_monitoring == 0,
-                    PotentialToken.deleted_at.is_(None)
+                    PotentialToken.deleted_at.is_(None),
+                    PotentialToken.permanently_deleted == 0
                 )
             )
             potential_tokens = result.scalars().all()
@@ -1662,6 +1714,32 @@ class TokenMonitorService:
                     token.last_ave_update = datetime.utcnow()
                     await session.flush()
 
+                    # 使用通用方法检查是否需要删除
+                    should_remove, removal_reason, removal_threshold = self._check_and_remove_by_thresholds(
+                        token, min_market_cap, min_liquidity
+                    )
+
+                    if should_remove:
+                        # 标记删除
+                        token.permanently_deleted = 1
+                        token.removal_reason = removal_reason
+                        token.removal_threshold_value = removal_threshold
+                        token.deleted_at = datetime.utcnow()
+                        removed_count += 1
+
+                        # 统计分类
+                        if removal_reason == "low_market_cap":
+                            removed_by_market_cap += 1
+                        elif removal_reason == "low_liquidity":
+                            removed_by_liquidity += 1
+
+                        # 日志
+                        logger.warning(
+                            f"🗑️ Auto-removed potential token {token.token_symbol}: {removal_reason} "
+                            f"(value: {removal_threshold:.2f}, threshold: "
+                            f"{min_market_cap if removal_reason == 'low_market_cap' else min_liquidity:.2f})"
+                        )
+
                     # 不再打印每个代币的成功更新，最后汇总
                     updated_count += 1
 
@@ -1678,12 +1756,20 @@ class TokenMonitorService:
                     f"✅ 成功更新 {updated_count}/{len(potential_tokens)} 个潜力代币 AVE 数据"
                     + (f", {failed_count} 个失败" if failed_count > 0 else "")
                 )
+                if removed_count > 0:
+                    logger.info(
+                        f"🗑️ 自动删除 {removed_count} 个潜力代币 "
+                        f"(市值: {removed_by_market_cap}, 流动性: {removed_by_liquidity})"
+                    )
             else:
                 logger.info(f"未更新任何潜力代币 (总共 {len(potential_tokens)} 个, {failed_count} 个失败)")
 
             return {
                 "updated": updated_count,
-                "failed": failed_count
+                "failed": failed_count,
+                "removed": removed_count,
+                "removed_by_market_cap": removed_by_market_cap,
+                "removed_by_liquidity": removed_by_liquidity
             }
 
     async def get_scraper_config(self) -> Optional[Dict[str, Any]]:

@@ -269,6 +269,9 @@ async def monitor_prices_task():
     start_time = None
 
     try:
+        # 任务开始计时（包含所有步骤）
+        start_time = datetime.utcnow()
+
         logger.info("="*80)
         logger.info("开始更新监控代币价格...")
         logger.info("="*80)
@@ -293,7 +296,6 @@ async def monitor_prices_task():
                    f"流动性阈值={config.get('min_monitor_liquidity')}")
 
         # 创建 MonitorLog 记录（状态：running）
-        start_time = datetime.utcnow()
         db_manager = DatabaseManager()
         monitor_log_id = str(uuid.uuid4())
 
@@ -312,15 +314,10 @@ async def monitor_prices_task():
         # 更新所有监控代币的价格
         result = await monitor_service.update_monitored_prices()
 
-        # 更新 MonitorLog 记录（状态：success）
-        end_time = datetime.utcnow()
-        duration = int((end_time - start_time).total_seconds())
-
+        # 更新 MonitorLog 记录（中间状态）
         async with db_manager.get_session() as session:
             monitor_log = await session.get(MonitorLog, monitor_log_id)
             if monitor_log:
-                monitor_log.completed_at = end_time
-                monitor_log.duration_seconds = duration
                 monitor_log.status = 'success'
                 monitor_log.tokens_monitored = result.get('total_monitored', 0)
                 monitor_log.tokens_updated = result.get('updated', 0)
@@ -330,8 +327,6 @@ async def monitor_prices_task():
                 monitor_log.removed_by_market_cap = result.get('removed_by_market_cap', 0)
                 monitor_log.removed_by_liquidity = result.get('removed_by_liquidity', 0)
                 await session.commit()
-
-        logger.info(f"✅ 已更新监控日志: 耗时 {duration}秒")
 
         logger.info(
             f"价格更新完成：更新 {result['updated']} 个代币，"
@@ -383,6 +378,18 @@ async def monitor_prices_task():
 
                 logger.info(f"✅ 已累加潜力代币删除统计到监控日志")
 
+        # 所有任务完成，计算总耗时并更新监控日志
+        end_time = datetime.utcnow()
+        duration = int((end_time - start_time).total_seconds())
+
+        async with db_manager.get_session() as session:
+            monitor_log = await session.get(MonitorLog, monitor_log_id)
+            if monitor_log:
+                monitor_log.completed_at = end_time
+                monitor_log.duration_seconds = duration
+                await session.commit()
+
+        logger.info(f"✅ 监控任务完成，总耗时: {duration} 秒")
         logger.info("="*80)
 
     except Exception as e:

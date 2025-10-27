@@ -10,17 +10,9 @@ BEGIN;
 -- =====================================================
 -- 1. 扩展 scraper_config 表 - 添加过滤条件字段
 -- =====================================================
-ALTER TABLE scraper_config
-ADD COLUMN IF NOT EXISTS min_market_cap NUMERIC(20, 2) DEFAULT NULL
-COMMENT '最小市值（美元），为空则不过滤';
-
-ALTER TABLE scraper_config
-ADD COLUMN IF NOT EXISTS min_liquidity NUMERIC(20, 2) DEFAULT NULL
-COMMENT '最小流动性（美元），为空则不过滤';
-
-ALTER TABLE scraper_config
-ADD COLUMN IF NOT EXISTS max_token_age_days INTEGER DEFAULT NULL
-COMMENT '最大代币年龄（天），为空则不过滤';
+ALTER TABLE scraper_config ADD COLUMN IF NOT EXISTS min_market_cap NUMERIC(20, 2) DEFAULT NULL;
+ALTER TABLE scraper_config ADD COLUMN IF NOT EXISTS min_liquidity NUMERIC(20, 2) DEFAULT NULL;
+ALTER TABLE scraper_config ADD COLUMN IF NOT EXISTS max_token_age_days INTEGER DEFAULT NULL;
 
 -- =====================================================
 -- 2. 创建 scrape_logs 表 - 记录爬虫执行日志
@@ -30,17 +22,17 @@ CREATE TABLE IF NOT EXISTS scrape_logs (
     started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     duration_seconds INTEGER,
-    status VARCHAR(20) NOT NULL DEFAULT 'running',  -- running, success, failed
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
     chain VARCHAR(20),
-    tokens_scraped INTEGER COMMENT '爬取到的代币总数',
-    tokens_filtered INTEGER COMMENT '过滤后剩余的代币数',
-    tokens_saved INTEGER COMMENT '保存到数据库的代币数',
-    tokens_skipped INTEGER COMMENT '跳过的代币数',
-    filtered_by_market_cap INTEGER DEFAULT 0 COMMENT '因市值被过滤的数量',
-    filtered_by_liquidity INTEGER DEFAULT 0 COMMENT '因流动性被过滤的数量',
-    filtered_by_age INTEGER DEFAULT 0 COMMENT '因年龄被过滤的数量',
+    tokens_scraped INTEGER,
+    tokens_filtered INTEGER,
+    tokens_saved INTEGER,
+    tokens_skipped INTEGER,
+    filtered_by_market_cap INTEGER DEFAULT 0,
+    filtered_by_liquidity INTEGER DEFAULT 0,
+    filtered_by_age INTEGER DEFAULT 0,
     error_message VARCHAR(1000),
-    config_snapshot JSONB COMMENT '配置快照',
+    config_snapshot JSONB,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -52,28 +44,23 @@ CREATE INDEX IF NOT EXISTS idx_scrape_logs_chain ON scrape_logs(chain);
 -- =====================================================
 -- 3. 扩展 monitored_tokens 表 - 添加删除原因跟踪
 -- =====================================================
-ALTER TABLE monitored_tokens
-ADD COLUMN IF NOT EXISTS removal_reason VARCHAR(50) DEFAULT NULL
-COMMENT '删除原因: low_market_cap, low_liquidity, manual, other';
-
-ALTER TABLE monitored_tokens
-ADD COLUMN IF NOT EXISTS removal_threshold_value NUMERIC(30, 2) DEFAULT NULL
-COMMENT '触发删除的阈值（市值或流动性）';
+ALTER TABLE monitored_tokens ADD COLUMN IF NOT EXISTS removal_reason VARCHAR(50) DEFAULT NULL;
+ALTER TABLE monitored_tokens ADD COLUMN IF NOT EXISTS removal_threshold_value NUMERIC(30, 2) DEFAULT NULL;
 
 -- =====================================================
 -- 4. 创建 monitor_config 表 - 监控配置
 -- =====================================================
 CREATE TABLE IF NOT EXISTS monitor_config (
     id VARCHAR(36) PRIMARY KEY,
-    min_monitor_market_cap NUMERIC(20, 2) DEFAULT NULL COMMENT '最小监控市值阈值',
-    min_monitor_liquidity NUMERIC(20, 2) DEFAULT NULL COMMENT '最小监控流动性阈值',
-    update_interval_minutes INTEGER NOT NULL DEFAULT 5 COMMENT '更新间隔（分钟）',
-    default_drop_threshold NUMERIC(5, 2) NOT NULL DEFAULT 20.0 COMMENT '默认跌幅阈值',
-    default_alert_thresholds JSONB NOT NULL DEFAULT '[70, 80, 90]' COMMENT '默认报警阈值',
-    enabled INTEGER NOT NULL DEFAULT 1 COMMENT '是否启用',
-    max_retry_count INTEGER NOT NULL DEFAULT 3 COMMENT '最大重试次数',
-    batch_size INTEGER NOT NULL DEFAULT 10 COMMENT '批处理大小',
-    description TEXT COMMENT '配置说明',
+    min_monitor_market_cap NUMERIC(20, 2) DEFAULT NULL,
+    min_monitor_liquidity NUMERIC(20, 2) DEFAULT NULL,
+    update_interval_minutes INTEGER NOT NULL DEFAULT 5,
+    default_drop_threshold NUMERIC(5, 2) NOT NULL DEFAULT 20.0,
+    default_alert_thresholds JSONB NOT NULL DEFAULT '[70, 80, 90]',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    max_retry_count INTEGER NOT NULL DEFAULT 3,
+    batch_size INTEGER NOT NULL DEFAULT 10,
+    description TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -98,15 +85,15 @@ CREATE TABLE IF NOT EXISTS monitor_logs (
     started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     duration_seconds INTEGER,
-    status VARCHAR(20) NOT NULL DEFAULT 'running',  -- running, success, failed
-    tokens_monitored INTEGER COMMENT '监控的代币总数',
-    tokens_updated INTEGER COMMENT '成功更新的代币数',
-    tokens_failed INTEGER COMMENT '更新失败的代币数',
-    tokens_auto_removed INTEGER COMMENT '自动删除的代币数',
-    alerts_triggered INTEGER COMMENT '触发的报警次数',
-    removed_by_market_cap INTEGER DEFAULT 0 COMMENT '因市值被删除的数量',
-    removed_by_liquidity INTEGER DEFAULT 0 COMMENT '因流动性被删除的数量',
-    removed_by_other INTEGER DEFAULT 0 COMMENT '因其他原因被删除的数量',
+    status VARCHAR(20) NOT NULL DEFAULT 'running',
+    tokens_monitored INTEGER,
+    tokens_updated INTEGER,
+    tokens_failed INTEGER,
+    tokens_auto_removed INTEGER,
+    alerts_triggered INTEGER,
+    removed_by_market_cap INTEGER DEFAULT 0,
+    removed_by_liquidity INTEGER DEFAULT 0,
+    removed_by_other INTEGER DEFAULT 0,
     error_message VARCHAR(1000),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

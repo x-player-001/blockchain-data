@@ -255,7 +255,7 @@ def schedule_next_scrape(config=None):
 
 async def monitor_prices_task():
     """
-    监控价格任务（每5分钟）
+    监控价格任务（从数据库读取配置）
     更新监控代币价格 + 潜力代币数据
     """
     from src.storage.models import MonitorLog
@@ -273,6 +273,25 @@ async def monitor_prices_task():
         logger.info("开始更新监控代币价格...")
         logger.info("="*80)
 
+        # 1. 从数据库读取监控配置
+        if not monitor_service:
+            monitor_service = TokenMonitorService()
+
+        config = await monitor_service.get_monitor_config()
+
+        if not config:
+            logger.error("未找到监控配置，跳过本次更新")
+            return
+
+        # 2. 检查配置是否启用
+        if not config.get('enabled', True):
+            logger.info("监控配置已禁用，跳过本次更新")
+            return
+
+        logger.info(f"配置信息: 间隔={config['update_interval_minutes']}分钟, "
+                   f"市值阈值={config.get('min_monitor_market_cap')}, "
+                   f"流动性阈值={config.get('min_monitor_liquidity')}")
+
         # 创建 MonitorLog 记录（状态：running）
         start_time = datetime.utcnow()
         db_manager = DatabaseManager()
@@ -282,15 +301,13 @@ async def monitor_prices_task():
             monitor_log = MonitorLog(
                 id=monitor_log_id,
                 started_at=start_time,
-                status='running'
+                status='running',
+                config_snapshot=config  # 保存配置快照
             )
             session.add(monitor_log)
             await session.commit()
 
         logger.info(f"📝 已创建监控日志记录: {monitor_log_id}")
-
-        if not monitor_service:
-            monitor_service = TokenMonitorService()
 
         # 更新所有监控代币的价格
         result = await monitor_service.update_monitored_prices()
@@ -521,16 +538,26 @@ async def main():
 
     # 根据参数添加任务
     if enable_monitor:
+        # 从数据库读取监控配置
+        monitor_config = await monitor_service.get_monitor_config()
+
+        if not monitor_config:
+            logger.error("未找到监控配置，使用默认间隔 5 分钟")
+            update_interval = 5
+        else:
+            update_interval = monitor_config.get('update_interval_minutes', 5)
+            logger.info(f"从配置读取更新间隔: {update_interval} 分钟")
+
         scheduler.add_job(
             monitor_prices_task,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=IntervalTrigger(minutes=update_interval),
             id='monitor_prices',
             name='监控代币价格',
             max_instances=1,
             coalesce=True,
             misfire_grace_time=30
         )
-        logger.info("✅ 已启用任务：每5分钟监控代币价格")
+        logger.info(f"✅ 已启用任务：每 {update_interval} 分钟监控代币价格")
 
         # K线更新任务：每1小时执行一次
         scheduler.add_job(
@@ -551,7 +578,7 @@ async def main():
     if enable_scraper:
         logger.info("  - 随机间隔9-15分钟爬取 DexScreener 首页（BSC + Solana，支持重试机制）")
     if enable_monitor:
-        logger.info("  - 每5分钟监控代币价格（更新 monitored_tokens 表并触发报警 + 更新 potential_tokens AVE 数据）")
+        logger.info(f"  - 每 {update_interval} 分钟监控代币价格（更新 monitored_tokens 表并触发报警 + 更新 potential_tokens AVE 数据）")
         logger.info("  - 每1小时更新K线数据（监控代币 + 潜力代币，5分钟K线）")
     logger.info("="*80)
 

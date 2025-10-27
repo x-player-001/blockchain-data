@@ -1772,6 +1772,47 @@ class TokenMonitorService:
                 "removed_by_liquidity": removed_by_liquidity
             }
 
+    async def get_monitor_config(self) -> Optional[Dict[str, Any]]:
+        """
+        获取监控配置
+
+        Returns:
+            配置字典，如果不存在则返回None
+        """
+        await self._ensure_db()
+
+        async with self.db_manager.get_session() as session:
+            try:
+                query = select(MonitorConfig).limit(1)
+                result = await session.execute(query)
+                config = result.scalar_one_or_none()
+
+                if not config:
+                    logger.warning("未找到监控配置，使用默认值")
+                    return {
+                        "enabled": True,
+                        "update_interval_minutes": 5,
+                        "min_monitor_market_cap": None,
+                        "min_monitor_liquidity": None,
+                        "max_retry_count": 3,
+                        "batch_size": 10
+                    }
+
+                return {
+                    "id": config.id,
+                    "enabled": bool(config.enabled),
+                    "update_interval_minutes": config.update_interval_minutes,
+                    "min_monitor_market_cap": float(config.min_monitor_market_cap) if config.min_monitor_market_cap else None,
+                    "min_monitor_liquidity": float(config.min_monitor_liquidity) if config.min_monitor_liquidity else None,
+                    "max_retry_count": config.max_retry_count,
+                    "batch_size": config.batch_size,
+                    "description": config.description
+                }
+
+            except Exception as e:
+                logger.error(f"获取监控配置失败: {e}")
+                return None
+
     async def get_scraper_config(self) -> Optional[Dict[str, Any]]:
         """
         获取爬虫配置

@@ -117,7 +117,38 @@ CREATE INDEX IF NOT EXISTS idx_monitor_logs_status ON monitor_logs(status);
 ALTER TABLE monitor_logs ADD COLUMN IF NOT EXISTS config_snapshot JSONB;
 
 -- =====================================================
--- 6. 为已有数据添加默认值
+-- 6. 创建 token_klines 表 - K线数据存储
+-- =====================================================
+CREATE TABLE IF NOT EXISTS token_klines (
+    id VARCHAR(36) PRIMARY KEY,
+    token_address VARCHAR(42) NOT NULL,
+    pair_address VARCHAR(42) NOT NULL,
+    chain VARCHAR(20) NOT NULL DEFAULT 'bsc',
+    timestamp BIGINT NOT NULL,
+    timeframe VARCHAR(10) NOT NULL DEFAULT 'minute',
+    aggregate INTEGER NOT NULL DEFAULT 5,
+    open NUMERIC(30, 18) NOT NULL,
+    high NUMERIC(30, 18) NOT NULL,
+    low NUMERIC(30, 18) NOT NULL,
+    close NUMERIC(30, 18) NOT NULL,
+    volume NUMERIC(30, 6) NOT NULL,
+    data_source VARCHAR(20) NOT NULL DEFAULT 'geckoterminal',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 创建索引
+CREATE INDEX IF NOT EXISTS idx_kline_token_time ON token_klines(token_address, timestamp);
+CREATE INDEX IF NOT EXISTS idx_kline_pair_time ON token_klines(pair_address, timestamp);
+CREATE INDEX IF NOT EXISTS idx_kline_timeframe ON token_klines(timeframe, aggregate);
+CREATE INDEX IF NOT EXISTS idx_kline_token_addr ON token_klines(token_address);
+CREATE INDEX IF NOT EXISTS idx_kline_pair_addr ON token_klines(pair_address);
+
+-- 唯一约束：同一交易对、同一时间、同一周期、同一聚合级别只能有一条K线
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kline_unique ON token_klines(pair_address, timestamp, timeframe, aggregate);
+
+-- =====================================================
+-- 7. 为已有数据添加默认值
 -- =====================================================
 
 -- 确保所有 monitored_tokens 的 permanently_deleted 有默认值
@@ -156,7 +187,12 @@ UNION ALL
 SELECT
     'monitor_logs' as table_name,
     COUNT(*) as record_count
-FROM monitor_logs;
+FROM monitor_logs
+UNION ALL
+SELECT
+    'token_klines' as table_name,
+    COUNT(*) as record_count
+FROM token_klines;
 
 -- =====================================================
 -- 迁移完成提示

@@ -1145,3 +1145,233 @@ async def get_scraper_stats(limit: int = Query(20, ge=1, le=100)):
     except Exception as e:
         logger.error(f"Error getting scraper stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/monitor/config")
+async def get_monitor_config():
+    """获取监控配置"""
+    from src.storage.models import MonitorConfig
+    from src.storage.db_manager import DatabaseManager
+    from sqlalchemy import select
+
+    db = DatabaseManager()
+    try:
+        async with db.get_session() as session:
+            result = await session.execute(select(MonitorConfig).limit(1))
+            config = result.scalar_one_or_none()
+
+            if not config:
+                # 返回默认配置
+                return {
+                    "min_monitor_market_cap": None,
+                    "min_monitor_liquidity": None,
+                    "update_interval_minutes": 5,
+                    "default_drop_threshold": 20.0,
+                    "default_alert_thresholds": [70, 80, 90],
+                    "enabled": 1,
+                    "max_retry_count": 3,
+                    "batch_size": 10,
+                    "description": None
+                }
+
+            return {
+                "id": config.id,
+                "min_monitor_market_cap": float(config.min_monitor_market_cap) if config.min_monitor_market_cap else None,
+                "min_monitor_liquidity": float(config.min_monitor_liquidity) if config.min_monitor_liquidity else None,
+                "update_interval_minutes": config.update_interval_minutes,
+                "default_drop_threshold": float(config.default_drop_threshold),
+                "default_alert_thresholds": config.default_alert_thresholds,
+                "enabled": config.enabled,
+                "max_retry_count": config.max_retry_count,
+                "batch_size": config.batch_size,
+                "description": config.description,
+                "created_at": config.created_at.isoformat() if config.created_at else None,
+                "updated_at": config.updated_at.isoformat() if config.updated_at else None
+            }
+    except Exception as e:
+        logger.error(f"Error getting monitor config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/monitor/config")
+async def update_monitor_config(
+    min_monitor_market_cap: Optional[float] = Body(None, ge=0),
+    min_monitor_liquidity: Optional[float] = Body(None, ge=0),
+    update_interval_minutes: Optional[int] = Body(None, ge=1, le=60),
+    default_drop_threshold: Optional[float] = Body(None, ge=1, le=100),
+    default_alert_thresholds: Optional[List[float]] = Body(None),
+    enabled: Optional[int] = Body(None, ge=0, le=1),
+    max_retry_count: Optional[int] = Body(None, ge=1, le=10),
+    batch_size: Optional[int] = Body(None, ge=1, le=100),
+    description: Optional[str] = Body(None)
+):
+    """更新监控配置（接收 JSON body）
+
+    配置说明：
+    - min_monitor_market_cap: 最小市值（美元），低于此值自动删除
+    - min_monitor_liquidity: 最小流动性（美元），低于此值自动删除
+    - update_interval_minutes: 更新间隔（分钟）
+    - default_drop_threshold: 默认跌幅阈值（%）
+    - default_alert_thresholds: 默认多级报警阈值
+    - enabled: 是否启用监控
+    - max_retry_count: API调用失败重试次数
+    - batch_size: 每批次处理的代币数量
+    """
+    from src.storage.models import MonitorConfig
+    from src.storage.db_manager import DatabaseManager
+    from sqlalchemy import select
+    from datetime import datetime
+    import uuid
+
+    db = DatabaseManager()
+    try:
+        async with db.get_session() as session:
+            result = await session.execute(select(MonitorConfig).limit(1))
+            config = result.scalar_one_or_none()
+
+            if not config:
+                config = MonitorConfig(id=str(uuid.uuid4()))
+                session.add(config)
+
+            if min_monitor_market_cap is not None:
+                config.min_monitor_market_cap = min_monitor_market_cap
+            if min_monitor_liquidity is not None:
+                config.min_monitor_liquidity = min_monitor_liquidity
+            if update_interval_minutes is not None:
+                config.update_interval_minutes = update_interval_minutes
+            if default_drop_threshold is not None:
+                config.default_drop_threshold = default_drop_threshold
+            if default_alert_thresholds is not None:
+                config.default_alert_thresholds = default_alert_thresholds
+            if enabled is not None:
+                config.enabled = enabled
+            if max_retry_count is not None:
+                config.max_retry_count = max_retry_count
+            if batch_size is not None:
+                config.batch_size = batch_size
+            if description is not None:
+                config.description = description
+
+            config.updated_at = datetime.utcnow()
+            await session.commit()
+            await session.refresh(config)
+
+            return {"success": True, "message": "监控配置已更新"}
+    except Exception as e:
+        logger.error(f"Error updating monitor config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/monitor/stats")
+async def get_monitor_stats(limit: int = Query(20, ge=1, le=100)):
+    """获取监控统计信息
+
+    返回：
+    - 总运行时长（天数/小时）
+    - 成功/失败次数统计
+    - 最近一次监控信息
+    - 最近N条监控历史记录
+    """
+    from src.storage.models import MonitorLog
+    from src.storage.db_manager import DatabaseManager
+    from sqlalchemy import select, func, desc, Integer
+    from datetime import datetime
+
+    db = DatabaseManager()
+    try:
+        async with db.get_session() as session:
+            # 1. 总体统计
+            total_result = await session.execute(
+                select(
+                    func.count(MonitorLog.id).label('total_runs'),
+                    func.sum((MonitorLog.status == 'success').cast(Integer)).label('success_count'),
+                    func.sum((MonitorLog.status == 'failed').cast(Integer)).label('failed_count'),
+                    func.sum(MonitorLog.tokens_updated).label('total_updated'),
+                    func.sum(MonitorLog.tokens_auto_removed).label('total_removed'),
+                    func.sum(MonitorLog.alerts_triggered).label('total_alerts'),
+                    func.min(MonitorLog.started_at).label('first_run'),
+                    func.max(MonitorLog.started_at).label('last_run')
+                )
+            )
+            stats = total_result.one()
+
+            # 2. 计算运行时长
+            running_days = 0
+            running_hours = 0
+            if stats.first_run and stats.last_run:
+                delta = stats.last_run - stats.first_run
+                running_days = delta.days
+                running_hours = delta.total_seconds() / 3600
+
+            # 3. 获取最近一次监控
+            latest_result = await session.execute(
+                select(MonitorLog)
+                .order_by(desc(MonitorLog.started_at))
+                .limit(1)
+            )
+            latest_log = latest_result.scalar_one_or_none()
+
+            # 4. 获取最近N条记录
+            history_result = await session.execute(
+                select(MonitorLog)
+                .order_by(desc(MonitorLog.started_at))
+                .limit(limit)
+            )
+            history_logs = history_result.scalars().all()
+
+            return {
+                "summary": {
+                    "total_runs": stats.total_runs or 0,
+                    "success_count": stats.success_count or 0,
+                    "failed_count": stats.failed_count or 0,
+                    "success_rate": round((stats.success_count or 0) / (stats.total_runs or 1) * 100, 2),
+                    "total_tokens_updated": stats.total_updated or 0,
+                    "total_tokens_removed": stats.total_removed or 0,
+                    "total_alerts_triggered": stats.total_alerts or 0,
+                    "running_days": running_days,
+                    "running_hours": round(running_hours, 2),
+                    "first_run": stats.first_run.isoformat() if stats.first_run else None,
+                    "last_run": stats.last_run.isoformat() if stats.last_run else None
+                },
+                "latest": {
+                    "id": latest_log.id if latest_log else None,
+                    "started_at": latest_log.started_at.isoformat() if latest_log and latest_log.started_at else None,
+                    "completed_at": latest_log.completed_at.isoformat() if latest_log and latest_log.completed_at else None,
+                    "duration_seconds": latest_log.duration_seconds if latest_log else None,
+                    "status": latest_log.status if latest_log else None,
+                    "tokens_monitored": latest_log.tokens_monitored if latest_log else 0,
+                    "tokens_updated": latest_log.tokens_updated if latest_log else 0,
+                    "tokens_failed": latest_log.tokens_failed if latest_log else 0,
+                    "tokens_auto_removed": latest_log.tokens_auto_removed if latest_log else 0,
+                    "alerts_triggered": latest_log.alerts_triggered if latest_log else 0,
+                    "removal_stats": {
+                        "by_market_cap": latest_log.removed_by_market_cap or 0,
+                        "by_liquidity": latest_log.removed_by_liquidity or 0,
+                        "by_other": latest_log.removed_by_other or 0
+                    } if latest_log else {"by_market_cap": 0, "by_liquidity": 0, "by_other": 0}
+                } if latest_log else None,
+                "history": [
+                    {
+                        "id": log.id,
+                        "started_at": log.started_at.isoformat(),
+                        "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+                        "duration_seconds": log.duration_seconds,
+                        "status": log.status,
+                        "tokens_monitored": log.tokens_monitored,
+                        "tokens_updated": log.tokens_updated,
+                        "tokens_failed": log.tokens_failed,
+                        "tokens_auto_removed": log.tokens_auto_removed,
+                        "alerts_triggered": log.alerts_triggered,
+                        "removal_stats": {
+                            "by_market_cap": log.removed_by_market_cap or 0,
+                            "by_liquidity": log.removed_by_liquidity or 0,
+                            "by_other": log.removed_by_other or 0
+                        },
+                        "error_message": log.error_message
+                    }
+                    for log in history_logs
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting monitor stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

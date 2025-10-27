@@ -257,12 +257,36 @@ async def monitor_prices_task():
     监控价格任务（每5分钟）
     更新监控代币价格 + 潜力代币数据
     """
+    from src.storage.models import MonitorLog
+    from src.storage.db_manager import DatabaseManager
+    import uuid
+
     global monitor_service
+
+    monitor_log_id = None
+    db_manager = None
+    start_time = None
 
     try:
         logger.info("="*80)
         logger.info("开始更新监控代币价格...")
         logger.info("="*80)
+
+        # 创建 MonitorLog 记录（状态：running）
+        start_time = datetime.utcnow()
+        db_manager = DatabaseManager()
+        monitor_log_id = str(uuid.uuid4())
+
+        async with db_manager.get_session() as session:
+            monitor_log = MonitorLog(
+                id=monitor_log_id,
+                started_at=start_time,
+                status='running'
+            )
+            session.add(monitor_log)
+            await session.commit()
+
+        logger.info(f"📝 已创建监控日志记录: {monitor_log_id}")
 
         if not monitor_service:
             monitor_service = TokenMonitorService()
@@ -270,10 +294,37 @@ async def monitor_prices_task():
         # 更新所有监控代币的价格
         result = await monitor_service.update_monitored_prices()
 
+        # 更新 MonitorLog 记录（状态：success）
+        end_time = datetime.utcnow()
+        duration = int((end_time - start_time).total_seconds())
+
+        async with db_manager.get_session() as session:
+            monitor_log = await session.get(MonitorLog, monitor_log_id)
+            if monitor_log:
+                monitor_log.completed_at = end_time
+                monitor_log.duration_seconds = duration
+                monitor_log.status = 'success'
+                monitor_log.tokens_monitored = result.get('total_monitored', 0)
+                monitor_log.tokens_updated = result.get('updated', 0)
+                monitor_log.tokens_failed = result.get('failed', 0)
+                monitor_log.tokens_auto_removed = result.get('removed', 0)
+                monitor_log.alerts_triggered = result.get('alerts_triggered', 0)
+                monitor_log.removed_by_market_cap = result.get('removed_by_market_cap', 0)
+                monitor_log.removed_by_liquidity = result.get('removed_by_liquidity', 0)
+                await session.commit()
+
+        logger.info(f"✅ 已更新监控日志: 耗时 {duration}秒")
+
         logger.info(
             f"价格更新完成：更新 {result['updated']} 个代币，"
             f"触发 {result['alerts_triggered']} 个报警"
         )
+        if result.get('removed', 0) > 0:
+            logger.info(
+                f"自动删除 {result['removed']} 个代币 "
+                f"(市值: {result.get('removed_by_market_cap', 0)}, "
+                f"流动性: {result.get('removed_by_liquidity', 0)})"
+            )
         logger.info("="*80)
 
         # 同时更新潜力代币的 AVE API 数据（带去重检查）
@@ -297,6 +348,32 @@ async def monitor_prices_task():
 
     except Exception as e:
         logger.error(f"监控任务失败: {e}", exc_info=True)
+
+        # 更新 MonitorLog 记录（状态：failed）
+        if monitor_log_id and db_manager and start_time:
+            try:
+                end_time = datetime.utcnow()
+                duration = int((end_time - start_time).total_seconds())
+
+                async with db_manager.get_session() as session:
+                    monitor_log = await session.get(MonitorLog, monitor_log_id)
+                    if monitor_log:
+                        monitor_log.completed_at = end_time
+                        monitor_log.duration_seconds = duration
+                        monitor_log.status = 'failed'
+                        monitor_log.error_message = str(e)[:1000]  # 限制长度
+                        await session.commit()
+
+                logger.info(f"❌ 已更新监控日志: 失败，耗时 {duration}秒")
+            except Exception as log_error:
+                logger.error(f"更新失败日志时出错: {log_error}")
+    finally:
+        # 关闭数据库连接
+        if db_manager:
+            try:
+                await db_manager.close()
+            except:
+                pass
 
 
 def shutdown_handler(signum, frame):

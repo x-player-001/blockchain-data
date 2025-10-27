@@ -13,7 +13,7 @@ from sqlalchemy import select, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.storage.db_manager import DatabaseManager
-from src.storage.models import MonitoredToken, PriceAlert, DexScreenerToken, PotentialToken, ScraperConfig
+from src.storage.models import MonitoredToken, PriceAlert, DexScreenerToken, PotentialToken, ScraperConfig, MonitorConfig
 from src.services.dexscreener_service import DexScreenerService
 from src.services.ave_api_service import ave_api_service
 from src.utils.logger import setup_logger
@@ -498,32 +498,52 @@ class TokenMonitorService:
             delay: Delay between API calls (seconds)
 
         Returns:
-            Update statistics
+            Update statistics including removal counts
         """
         await self._ensure_db()
 
         logger.info("Updating prices for monitored tokens using AVE API...")
 
-        # Get all monitored tokens (active and alerted, but not stopped)
+        # Load monitor configuration
+        monitor_config = None
+        async with self.db_manager.get_session() as session:
+            config_result = await session.execute(
+                select(MonitorConfig).limit(1)
+            )
+            monitor_config = config_result.scalar_one_or_none()
+
+        min_market_cap = None
+        min_liquidity = None
+        if monitor_config:
+            min_market_cap = float(monitor_config.min_monitor_market_cap) if monitor_config.min_monitor_market_cap else None
+            min_liquidity = float(monitor_config.min_monitor_liquidity) if monitor_config.min_monitor_liquidity else None
+            if min_market_cap or min_liquidity:
+                logger.info(f"监控过滤阈值: 市值 >= {min_market_cap}, 流动性 >= {min_liquidity}")
+
+        # Get all monitored tokens (active and alerted, but not stopped or deleted)
         # 已触发报警的代币也要继续更新，因为可能有多级阈值
         async with self.db_manager.get_session() as session:
             result = await session.execute(
                 select(MonitoredToken).where(
                     MonitoredToken.status != "stopped",
-                    MonitoredToken.deleted_at.is_(None)
+                    MonitoredToken.deleted_at.is_(None),
+                    MonitoredToken.permanently_deleted == 0
                 )
             )
             monitored_tokens = result.scalars().all()
 
         if not monitored_tokens:
             logger.info("No monitored tokens to update")
-            return {"updated": 0, "alerts_triggered": 0}
+            return {"updated": 0, "alerts_triggered": 0, "removed": 0}
 
         logger.info(f"Found {len(monitored_tokens)} monitored tokens (including alerted)")
 
         # Update prices and check for alerts
         updated_count = 0
         alerts_triggered = 0
+        removed_count = 0
+        removed_by_market_cap = 0
+        removed_by_liquidity = 0
         import time
 
         async with self.db_manager.get_session() as session:
@@ -638,6 +658,37 @@ class TokenMonitorService:
                     if await self._check_and_trigger_alert(session, token, price_data_dict):
                         alerts_triggered += 1
 
+                    # Check if token should be auto-removed based on thresholds
+                    should_remove = False
+                    removal_reason = None
+                    removal_threshold = None
+
+                    if min_market_cap is not None and token.current_market_cap is not None:
+                        if float(token.current_market_cap) < min_market_cap:
+                            should_remove = True
+                            removal_reason = "low_market_cap"
+                            removal_threshold = float(token.current_market_cap)
+                            removed_by_market_cap += 1
+
+                    if not should_remove and min_liquidity is not None and token.current_tvl is not None:
+                        if float(token.current_tvl) < min_liquidity:
+                            should_remove = True
+                            removal_reason = "low_liquidity"
+                            removal_threshold = float(token.current_tvl)
+                            removed_by_liquidity += 1
+
+                    if should_remove:
+                        token.permanently_deleted = 1
+                        token.removal_reason = removal_reason
+                        token.removal_threshold_value = removal_threshold
+                        token.deleted_at = datetime.utcnow()
+                        removed_count += 1
+                        logger.warning(
+                            f"🗑️ Auto-removed {token.token_symbol}: {removal_reason} "
+                            f"(value: {removal_threshold:.2f}, threshold: "
+                            f"{min_market_cap if removal_reason == 'low_market_cap' else min_liquidity:.2f})"
+                        )
+
                     # Delay to avoid rate limiting
                     time.sleep(delay)
 
@@ -654,13 +705,21 @@ class TokenMonitorService:
                 f"✅ 成功更新 {updated_count}/{len(monitored_tokens)} 个监控代币, "
                 f"触发报警 {alerts_triggered} 次"
             )
+            if removed_count > 0:
+                logger.info(
+                    f"🗑️ 自动删除 {removed_count} 个代币 "
+                    f"(市值: {removed_by_market_cap}, 流动性: {removed_by_liquidity})"
+                )
         else:
             logger.info(f"未更新任何代币 (总共 {len(monitored_tokens)} 个)")
 
         return {
             "updated": updated_count,
             "alerts_triggered": alerts_triggered,
-            "total_monitored": len(monitored_tokens)
+            "total_monitored": len(monitored_tokens),
+            "removed": removed_count,
+            "removed_by_market_cap": removed_by_market_cap,
+            "removed_by_liquidity": removed_by_liquidity
         }
 
     async def _check_and_trigger_alert(

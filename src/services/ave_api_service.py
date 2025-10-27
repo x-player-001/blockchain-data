@@ -124,7 +124,7 @@ class AveApiService:
 
             # 市场数据
             'current_tvl': self._safe_decimal(data.get('tvl')),
-            'current_market_cap': self._safe_decimal(data.get('mc')),
+            'current_market_cap': self._safe_decimal(data.get('market_cap') or data.get('fdv')),
 
             # Token创建信息
             'token_created_at': self._parse_timestamp(data.get('first_trade_at')),

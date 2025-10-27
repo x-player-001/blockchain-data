@@ -744,10 +744,6 @@ class MonitorConfig(Base):
     # 更新频率
     update_interval_minutes = Column(Integer, nullable=False, default=5, comment="更新间隔（分钟）")
 
-    # 报警设置
-    default_drop_threshold = Column(Numeric(5, 2), nullable=False, default=20.0, comment="默认跌幅阈值（%）")
-    default_alert_thresholds = Column(JSONB, nullable=False, default=[70, 80, 90], comment="默认多级报警阈值")
-
     # 其他配置
     enabled = Column(Integer, nullable=False, default=1, comment="是否启用监控（0=禁用，1=启用）")
     max_retry_count = Column(Integer, nullable=False, default=3, comment="AVE API调用失败重试次数")

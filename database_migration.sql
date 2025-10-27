@@ -55,8 +55,6 @@ CREATE TABLE IF NOT EXISTS monitor_config (
     min_monitor_market_cap NUMERIC(20, 2) DEFAULT NULL,
     min_monitor_liquidity NUMERIC(20, 2) DEFAULT NULL,
     update_interval_minutes INTEGER NOT NULL DEFAULT 5,
-    default_drop_threshold NUMERIC(5, 2) NOT NULL DEFAULT 20.0,
-    default_alert_thresholds JSONB NOT NULL DEFAULT '[70, 80, 90]',
     enabled INTEGER NOT NULL DEFAULT 1,
     max_retry_count INTEGER NOT NULL DEFAULT 3,
     batch_size INTEGER NOT NULL DEFAULT 10,
@@ -66,14 +64,12 @@ CREATE TABLE IF NOT EXISTS monitor_config (
 );
 
 -- 插入默认配置（如果不存在）
-INSERT INTO monitor_config (id, min_monitor_market_cap, min_monitor_liquidity, update_interval_minutes, default_drop_threshold, default_alert_thresholds, enabled)
+INSERT INTO monitor_config (id, min_monitor_market_cap, min_monitor_liquidity, update_interval_minutes, enabled)
 SELECT
     gen_random_uuid()::text,
     NULL,
     NULL,
     5,
-    20.0,
-    '[70, 80, 90]'::jsonb,
     1
 WHERE NOT EXISTS (SELECT 1 FROM monitor_config LIMIT 1);
 

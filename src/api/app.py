@@ -1166,8 +1166,6 @@ async def get_monitor_config():
                     "min_monitor_market_cap": None,
                     "min_monitor_liquidity": None,
                     "update_interval_minutes": 5,
-                    "default_drop_threshold": 20.0,
-                    "default_alert_thresholds": [70, 80, 90],
                     "enabled": 1,
                     "max_retry_count": 3,
                     "batch_size": 10,
@@ -1179,8 +1177,6 @@ async def get_monitor_config():
                 "min_monitor_market_cap": float(config.min_monitor_market_cap) if config.min_monitor_market_cap else None,
                 "min_monitor_liquidity": float(config.min_monitor_liquidity) if config.min_monitor_liquidity else None,
                 "update_interval_minutes": config.update_interval_minutes,
-                "default_drop_threshold": float(config.default_drop_threshold),
-                "default_alert_thresholds": config.default_alert_thresholds,
                 "enabled": config.enabled,
                 "max_retry_count": config.max_retry_count,
                 "batch_size": config.batch_size,
@@ -1198,8 +1194,6 @@ async def update_monitor_config(
     min_monitor_market_cap: Optional[float] = Body(None, ge=0),
     min_monitor_liquidity: Optional[float] = Body(None, ge=0),
     update_interval_minutes: Optional[int] = Body(None, ge=1, le=60),
-    default_drop_threshold: Optional[float] = Body(None, ge=1, le=100),
-    default_alert_thresholds: Optional[List[float]] = Body(None),
     enabled: Optional[int] = Body(None, ge=0, le=1),
     max_retry_count: Optional[int] = Body(None, ge=1, le=10),
     batch_size: Optional[int] = Body(None, ge=1, le=100),
@@ -1211,8 +1205,6 @@ async def update_monitor_config(
     - min_monitor_market_cap: 最小市值（美元），低于此值自动删除
     - min_monitor_liquidity: 最小流动性（美元），低于此值自动删除
     - update_interval_minutes: 更新间隔（分钟）
-    - default_drop_threshold: 默认跌幅阈值（%）
-    - default_alert_thresholds: 默认多级报警阈值
     - enabled: 是否启用监控
     - max_retry_count: API调用失败重试次数
     - batch_size: 每批次处理的代币数量
@@ -1239,10 +1231,6 @@ async def update_monitor_config(
                 config.min_monitor_liquidity = min_monitor_liquidity
             if update_interval_minutes is not None:
                 config.update_interval_minutes = update_interval_minutes
-            if default_drop_threshold is not None:
-                config.default_drop_threshold = default_drop_threshold
-            if default_alert_thresholds is not None:
-                config.default_alert_thresholds = default_alert_thresholds
             if enabled is not None:
                 config.enabled = enabled
             if max_retry_count is not None:

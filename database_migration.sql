@@ -48,6 +48,20 @@ ALTER TABLE monitored_tokens ADD COLUMN IF NOT EXISTS removal_reason VARCHAR(50)
 ALTER TABLE monitored_tokens ADD COLUMN IF NOT EXISTS removal_threshold_value NUMERIC(30, 2) DEFAULT NULL;
 
 -- =====================================================
+-- 3.5. 扩展 scrape_logs 表 - 确保所有字段存在（兼容旧版本）
+-- =====================================================
+-- 如果表已存在但缺少某些字段，补充添加
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'scrape_logs') THEN
+        ALTER TABLE scrape_logs ADD COLUMN IF NOT EXISTS config_snapshot JSONB;
+        ALTER TABLE scrape_logs ADD COLUMN IF NOT EXISTS filtered_by_market_cap INTEGER DEFAULT 0;
+        ALTER TABLE scrape_logs ADD COLUMN IF NOT EXISTS filtered_by_liquidity INTEGER DEFAULT 0;
+        ALTER TABLE scrape_logs ADD COLUMN IF NOT EXISTS filtered_by_age INTEGER DEFAULT 0;
+    END IF;
+END $$;
+
+-- =====================================================
 -- 4. 创建 monitor_config 表 - 监控配置
 -- =====================================================
 CREATE TABLE IF NOT EXISTS monitor_config (
@@ -98,6 +112,9 @@ CREATE TABLE IF NOT EXISTS monitor_logs (
 -- 创建索引
 CREATE INDEX IF NOT EXISTS idx_monitor_logs_started_at ON monitor_logs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_monitor_logs_status ON monitor_logs(status);
+
+-- 为已存在的表添加缺失的字段（兼容旧版本）
+ALTER TABLE monitor_logs ADD COLUMN IF NOT EXISTS config_snapshot JSONB;
 
 -- =====================================================
 -- 6. 为已有数据添加默认值

@@ -803,3 +803,45 @@ class MonitorLog(Base):
 
     def __repr__(self):
         return f"<MonitorLog {self.status} at {self.started_at} updated={self.tokens_updated}>"
+
+
+class TokenKline(Base):
+    """K线数据表 - 存储代币的OHLCV数据"""
+
+    __tablename__ = "token_klines"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # 关联信息
+    token_address = Column(String(42), nullable=False, index=True, comment="代币地址")
+    pair_address = Column(String(42), nullable=False, index=True, comment="交易对地址")
+    chain = Column(String(20), nullable=False, default="bsc", comment="链名称")
+
+    # K线时间信息
+    timestamp = Column(BigInteger, nullable=False, index=True, comment="K线时间戳(秒)")
+    timeframe = Column(String(10), nullable=False, default="minute", comment="时间周期: minute/hour/day")
+    aggregate = Column(Integer, nullable=False, default=5, comment="聚合级别: 1/5/15...")
+
+    # OHLCV数据
+    open = Column(Numeric(30, 18), nullable=False, comment="开盘价")
+    high = Column(Numeric(30, 18), nullable=False, comment="最高价")
+    low = Column(Numeric(30, 18), nullable=False, comment="最低价")
+    close = Column(Numeric(30, 18), nullable=False, comment="收盘价")
+    volume = Column(Numeric(30, 6), nullable=False, comment="成交量")
+
+    # 元数据
+    data_source = Column(String(20), nullable=False, default="geckoterminal", comment="数据来源")
+    created_at = Column(DateTime, default=datetime.utcnow, comment="记录创建时间")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="记录更新时间")
+
+    # 索引
+    __table_args__ = (
+        Index("idx_kline_token_time", "token_address", "timestamp"),
+        Index("idx_kline_pair_time", "pair_address", "timestamp"),
+        Index("idx_kline_timeframe", "timeframe", "aggregate"),
+        # 唯一约束：同一交易对、同一时间、同一周期、同一聚合级别只能有一条K线
+        Index("idx_kline_unique", "pair_address", "timestamp", "timeframe", "aggregate", unique=True),
+    )
+
+    def __repr__(self):
+        return f"<TokenKline {self.token_address[:8]}... {self.timeframe}/{self.aggregate} @ {self.timestamp}>"

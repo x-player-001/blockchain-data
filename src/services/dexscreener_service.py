@@ -1291,11 +1291,12 @@ class DexScreenerService:
                     except:
                         pass
 
-            # 提取 age（年龄字段，格式：21h, 5d, 2m）
+            # 提取 age（年龄字段，格式：21h, 5d, 2m, 1mo）
             import re
             for part in parts:
-                # 匹配格式：数字 + 单位 (h=小时, d=天, m=月, y=年)
-                age_match = re.match(r'^(\d+)([hdmy])$', part.strip())
+                # 匹配格式：数字 + 单位 (h=小时, d=天, mo=月, m=月, y=年)
+                # 注意：mo 要在 m 之前匹配，避免 "5mo" 被识别为 "5m"
+                age_match = re.match(r'^(\d+)(mo|h|d|m|y)$', part.strip())
                 if age_match:
                     value = int(age_match.group(1))
                     unit = age_match.group(2)
@@ -1306,7 +1307,7 @@ class DexScreenerService:
                         token_data['age_days'] = value / 24.0
                     elif unit == 'd':  # 天
                         token_data['age_days'] = float(value)
-                    elif unit == 'm':  # 月
+                    elif unit == 'm' or unit == 'mo':  # 月
                         token_data['age_days'] = value * 30.0
                     elif unit == 'y':  # 年
                         token_data['age_days'] = value * 365.0
@@ -1512,6 +1513,12 @@ class DexScreenerService:
                 # 获取最终页面内容
                 page_source = driver.page_source
                 logger.debug(f"页面源码长度: {len(page_source):,} 字符")
+
+                # 保存HTML用于调试
+                debug_file = f'/tmp/dexscreener_{chain}_success.html'
+                with open(debug_file, 'w', encoding='utf-8') as f:
+                    f.write(page_source)
+                logger.info(f"页面HTML已保存到: {debug_file}")
 
                 # 解析 HTML
                 soup = BeautifulSoup(page_source, 'html.parser')

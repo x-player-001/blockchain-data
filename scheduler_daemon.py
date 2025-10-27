@@ -442,8 +442,7 @@ async def update_klines_task():
         logger.info(f"  潜力代币: {result['potential']} 个")
         logger.info(f"  总代币数: {result['total']} 个")
         logger.info(f"  成功: {result['success']} 个，失败: {result['failed']} 个")
-        logger.info(f"  拉取: {result['fetched']} 根，保存: {result['saved']} 根")
-        logger.info(f"  耗时: {result.get('duration', 0):.2f} 秒")
+        logger.info(f"  拉取: {result['total_fetched']} 根，保存: {result['total_saved']} 根")
         logger.info("="*80)
 
     except Exception as e:

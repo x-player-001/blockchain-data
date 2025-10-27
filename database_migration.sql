@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS monitor_logs (
     removed_by_liquidity INTEGER DEFAULT 0,
     removed_by_other INTEGER DEFAULT 0,
     error_message VARCHAR(1000),
+    config_snapshot JSONB,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

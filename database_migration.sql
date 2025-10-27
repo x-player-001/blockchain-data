@@ -121,8 +121,8 @@ ALTER TABLE monitor_logs ADD COLUMN IF NOT EXISTS config_snapshot JSONB;
 -- =====================================================
 CREATE TABLE IF NOT EXISTS token_klines (
     id VARCHAR(36) PRIMARY KEY,
-    token_address VARCHAR(42) NOT NULL,
-    pair_address VARCHAR(42) NOT NULL,
+    token_address VARCHAR(100) NOT NULL,
+    pair_address VARCHAR(100) NOT NULL,
     chain VARCHAR(20) NOT NULL DEFAULT 'bsc',
     timestamp BIGINT NOT NULL,
     timeframe VARCHAR(10) NOT NULL DEFAULT 'minute',
@@ -146,6 +146,17 @@ CREATE INDEX IF NOT EXISTS idx_kline_pair_addr ON token_klines(pair_address);
 
 -- 唯一约束：同一交易对、同一时间、同一周期、同一聚合级别只能有一条K线
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kline_unique ON token_klines(pair_address, timestamp, timeframe, aggregate);
+
+-- 如果表已存在，扩展地址字段长度以支持 Solana 地址
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'token_klines') THEN
+        -- 扩展 token_address 字段
+        ALTER TABLE token_klines ALTER COLUMN token_address TYPE VARCHAR(100);
+        -- 扩展 pair_address 字段
+        ALTER TABLE token_klines ALTER COLUMN pair_address TYPE VARCHAR(100);
+    END IF;
+END $$;
 
 -- =====================================================
 -- 7. 为已有数据添加默认值

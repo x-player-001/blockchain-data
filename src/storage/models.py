@@ -813,8 +813,8 @@ class TokenKline(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
 
     # 关联信息
-    token_address = Column(String(42), nullable=False, index=True, comment="代币地址")
-    pair_address = Column(String(42), nullable=False, index=True, comment="交易对地址")
+    token_address = Column(String(100), nullable=False, index=True, comment="代币地址")  # 扩展支持 Solana
+    pair_address = Column(String(100), nullable=False, index=True, comment="交易对地址")  # 扩展支持 Solana
     chain = Column(String(20), nullable=False, default="bsc", comment="链名称")
 
     # K线时间信息

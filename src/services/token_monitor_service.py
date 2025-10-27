@@ -171,12 +171,77 @@ class TokenMonitorService:
             for token in tokens
         ]
 
+    def _apply_token_filters(
+        self,
+        tokens: List[Dict[str, Any]],
+        filter_config: Dict[str, Any]
+    ) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """
+        应用代币过滤条件
+
+        Args:
+            tokens: 代币列表（DexScreener格式）
+            filter_config: 过滤配置
+
+        Returns:
+            (过滤后的代币列表, 过滤统计信息)
+        """
+        min_market_cap = filter_config.get('min_market_cap')
+        min_liquidity = filter_config.get('min_liquidity')
+        max_token_age_days = filter_config.get('max_token_age_days')
+
+        filtered_tokens = []
+        stats = {
+            'by_market_cap': 0,
+            'by_liquidity': 0,
+            'by_age': 0
+        }
+
+        current_time = datetime.utcnow()
+
+        for token in tokens:
+            # 检查市值
+            if min_market_cap is not None:
+                market_cap = token.get('fdv') or token.get('marketCap')
+                if market_cap is None or float(market_cap) < float(min_market_cap):
+                    stats['by_market_cap'] += 1
+                    continue
+
+            # 检查流动性
+            if min_liquidity is not None:
+                liquidity = token.get('liquidity', {}).get('usd')
+                if liquidity is None or float(liquidity) < float(min_liquidity):
+                    stats['by_liquidity'] += 1
+                    continue
+
+            # 检查代币年龄
+            if max_token_age_days is not None:
+                pair_created_at = token.get('pairCreatedAt')
+                if pair_created_at:
+                    try:
+                        # pairCreatedAt 可能是时间戳（毫秒）
+                        created_timestamp = int(pair_created_at) / 1000 if pair_created_at > 1000000000000 else int(pair_created_at)
+                        created_time = datetime.fromtimestamp(created_timestamp)
+                        age_days = (current_time - created_time).total_seconds() / 86400
+
+                        if age_days > max_token_age_days:
+                            stats['by_age'] += 1
+                            continue
+                    except Exception as e:
+                        logger.warning(f"Failed to parse pairCreatedAt: {pair_created_at}, error: {e}")
+
+            # 通过所有过滤条件
+            filtered_tokens.append(token)
+
+        return filtered_tokens, stats
+
     def scrape_and_filter_top_gainers(
         self,
         count: int = 100,
         top_n: int = 10,
-        headless: bool = False
-    ) -> List[Dict[str, Any]]:
+        headless: bool = False,
+        filter_config: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         【独立功能1】只负责爬取和筛选Top涨幅代币，不添加到监控表
 
@@ -184,9 +249,10 @@ class TokenMonitorService:
             count: 爬取代币数量
             top_n: 筛选前N名
             headless: 是否使用无头浏览器（建议False以绕过Cloudflare）
+            filter_config: 过滤配置 {min_market_cap, min_liquidity, max_token_age_days}
 
         Returns:
-            前N名涨幅代币列表
+            字典包含：top_gainers（前N名代币列表）和过滤统计信息
         """
         logger.info(f"\n{'='*60}")
         logger.info(f"【爬取筛选】开始爬取并筛选 Top {top_n} 涨幅代币")
@@ -200,7 +266,12 @@ class TokenMonitorService:
 
         if not detailed_tokens:
             logger.warning("未获取到代币数据")
-            return []
+            return {
+                "top_gainers": [],
+                "scraped_count": 0,
+                "filtered_count": 0,
+                "filter_stats": {}
+            }
 
         logger.info(f"✓ 已爬取 {len(detailed_tokens)} 个代币（含完整数据）")
 
@@ -212,9 +283,21 @@ class TokenMonitorService:
 
         logger.info(f"✓ 其中 {len(tokens_with_change)} 个有24h涨幅数据")
 
+        # 【新增】应用过滤条件
+        filtered_tokens, filter_stats = self._apply_token_filters(
+            tokens_with_change,
+            filter_config or {}
+        )
+
+        logger.info(f"✓ 过滤后剩余 {len(filtered_tokens)} 个代币")
+        if filter_stats:
+            logger.info(f"   - 因市值过滤: {filter_stats.get('by_market_cap', 0)} 个")
+            logger.info(f"   - 因流动性过滤: {filter_stats.get('by_liquidity', 0)} 个")
+            logger.info(f"   - 因年龄过滤: {filter_stats.get('by_age', 0)} 个")
+
         # 按24h涨幅排序
         sorted_tokens = sorted(
-            tokens_with_change,
+            filtered_tokens,
             key=lambda x: float(x.get('priceChange', {}).get('h24', 0)),
             reverse=True
         )
@@ -231,7 +314,12 @@ class TokenMonitorService:
             logger.info(f"{idx:2d}. {symbol:12s} +{change:>7.2f}%  价格: ${price}")
         logger.info(f"{'='*60}\n")
 
-        return top_gainers
+        return {
+            "top_gainers": top_gainers,
+            "scraped_count": len(detailed_tokens),
+            "filtered_count": len(filtered_tokens),
+            "filter_stats": filter_stats
+        }
 
     async def add_tokens_to_monitor(
         self,
@@ -366,18 +454,20 @@ class TokenMonitorService:
         logger.info("="*60)
 
         # 步骤1: 爬取和筛选
-        top_gainers = self.scrape_and_filter_top_gainers(
+        scrape_result = self.scrape_and_filter_top_gainers(
             count=count,
             top_n=top_n,
             headless=headless
         )
 
+        top_gainers = scrape_result["top_gainers"]
         if not top_gainers:
             return {
-                "scraped": 0,
+                "scraped": scrape_result["scraped_count"],
                 "top_gainers": 0,
                 "saved": 0,
-                "skipped": 0
+                "skipped": 0,
+                "filter_stats": scrape_result.get("filter_stats", {})
             }
 
         # 步骤2: 添加到监控
@@ -387,10 +477,12 @@ class TokenMonitorService:
         )
 
         return {
-            "scraped": count,
+            "scraped": scrape_result["scraped_count"],
+            "filtered": scrape_result["filtered_count"],
             "top_gainers": len(top_gainers),
             "added": add_result["added"],
-            "skipped": add_result["skipped"]
+            "skipped": add_result["skipped"],
+            "filter_stats": scrape_result.get("filter_stats", {})
         }
 
     async def update_monitored_prices(
@@ -829,18 +921,20 @@ class TokenMonitorService:
         logger.info("="*60)
 
         # 步骤1: 爬取和筛选
-        top_gainers = self.scrape_and_filter_top_gainers(
+        scrape_result = self.scrape_and_filter_top_gainers(
             count=count,
             top_n=top_n,
             headless=headless
         )
 
+        top_gainers = scrape_result["top_gainers"]
         if not top_gainers:
             return {
-                "scraped": 0,
+                "scraped": scrape_result["scraped_count"],
                 "top_gainers": 0,
                 "saved": 0,
-                "skipped": 0
+                "skipped": 0,
+                "filter_stats": scrape_result.get("filter_stats", {})
             }
 
         # 步骤2: 保存到 potential_tokens 表
@@ -935,10 +1029,12 @@ class TokenMonitorService:
         )
 
         return {
-            "scraped": count,
+            "scraped": scrape_result["scraped_count"],
+            "filtered": scrape_result["filtered_count"],
             "top_gainers": len(top_gainers),
             "saved": added_count,  # 包含新增和更新的数量
-            "skipped": skipped_count
+            "skipped": skipped_count,
+            "filter_stats": scrape_result.get("filter_stats", {})
         }
 
     async def get_potential_tokens(

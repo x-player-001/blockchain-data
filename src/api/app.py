@@ -888,6 +888,9 @@ async def get_scraper_config():
                 "scrape_interval_min": config.scrape_interval_min,
                 "scrape_interval_max": config.scrape_interval_max,
                 "enabled_chains": config.enabled_chains,
+                "min_market_cap": float(config.min_market_cap) if config.min_market_cap else None,
+                "min_liquidity": float(config.min_liquidity) if config.min_liquidity else None,
+                "max_token_age_days": config.max_token_age_days,
                 "use_undetected_chrome": config.use_undetected_chrome,
                 "enabled": config.enabled,
                 "description": config.description
@@ -904,11 +907,20 @@ async def update_scraper_config(
     scrape_interval_min: Optional[int] = Body(None, ge=1, le=60),
     scrape_interval_max: Optional[int] = Body(None, ge=1, le=120),
     enabled_chains: Optional[List[str]] = Body(None),
+    min_market_cap: Optional[float] = Body(None, ge=0),
+    min_liquidity: Optional[float] = Body(None, ge=0),
+    max_token_age_days: Optional[int] = Body(None, ge=0),
     use_undetected_chrome: Optional[int] = Body(None, ge=0, le=1),
     enabled: Optional[int] = Body(None, ge=0, le=1),
     description: Optional[str] = Body(None)
 ):
-    """更新爬虫配置（接收 JSON body）"""
+    """更新爬虫配置（接收 JSON body）
+
+    新增过滤条件：
+    - min_market_cap: 最小市值（美元），为空则不过滤
+    - min_liquidity: 最小流动性（美元），为空则不过滤
+    - max_token_age_days: 最大代币年龄（天），为空则不过滤
+    """
     from src.storage.models import ScraperConfig
     from src.storage.db_manager import DatabaseManager
     from sqlalchemy import select
@@ -938,6 +950,12 @@ async def update_scraper_config(
                 config.scrape_interval_max = scrape_interval_max
             if enabled_chains is not None:
                 config.enabled_chains = enabled_chains
+            if min_market_cap is not None:
+                config.min_market_cap = min_market_cap
+            if min_liquidity is not None:
+                config.min_liquidity = min_liquidity
+            if max_token_age_days is not None:
+                config.max_token_age_days = max_token_age_days
             if use_undetected_chrome is not None:
                 config.use_undetected_chrome = use_undetected_chrome
             if enabled is not None:
@@ -1025,3 +1043,105 @@ async def permanently_delete_potential_token(token_id: str):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         await monitor_service.close()
+
+
+@app.get("/api/scraper/stats")
+async def get_scraper_stats(limit: int = Query(20, ge=1, le=100)):
+    """获取爬虫统计信息
+
+    返回：
+    - 总运行时长（天数/小时）
+    - 成功/失败次数统计
+    - 最近一次抓取信息
+    - 最近N条抓取历史记录
+    """
+    from src.storage.models import ScrapeLog
+    from src.storage.db_manager import DatabaseManager
+    from sqlalchemy import select, func, desc, Integer
+    from datetime import datetime
+
+    db = DatabaseManager()
+    try:
+        async with db.get_session() as session:
+            # 1. 总体统计
+            total_result = await session.execute(
+                select(
+                    func.count(ScrapeLog.id).label('total_runs'),
+                    func.sum((ScrapeLog.status == 'success').cast(Integer)).label('success_count'),
+                    func.sum((ScrapeLog.status == 'failed').cast(Integer)).label('failed_count'),
+                    func.sum(ScrapeLog.tokens_saved).label('total_saved'),
+                    func.min(ScrapeLog.started_at).label('first_run'),
+                    func.max(ScrapeLog.started_at).label('last_run')
+                )
+            )
+            stats = total_result.one()
+
+            # 2. 计算运行时长
+            running_days = 0
+            running_hours = 0
+            if stats.first_run and stats.last_run:
+                delta = stats.last_run - stats.first_run
+                running_days = delta.days
+                running_hours = delta.total_seconds() / 3600
+
+            # 3. 获取最近一次抓取
+            latest_result = await session.execute(
+                select(ScrapeLog)
+                .order_by(desc(ScrapeLog.started_at))
+                .limit(1)
+            )
+            latest_log = latest_result.scalar_one_or_none()
+
+            # 4. 获取最近N条记录
+            history_result = await session.execute(
+                select(ScrapeLog)
+                .order_by(desc(ScrapeLog.started_at))
+                .limit(limit)
+            )
+            history_logs = history_result.scalars().all()
+
+            return {
+                "summary": {
+                    "total_runs": stats.total_runs or 0,
+                    "success_count": stats.success_count or 0,
+                    "failed_count": stats.failed_count or 0,
+                    "success_rate": round((stats.success_count or 0) / (stats.total_runs or 1) * 100, 2),
+                    "total_tokens_saved": stats.total_saved or 0,
+                    "running_days": running_days,
+                    "running_hours": round(running_hours, 2),
+                    "first_run": stats.first_run.isoformat() if stats.first_run else None,
+                    "last_run": stats.last_run.isoformat() if stats.last_run else None
+                },
+                "latest": {
+                    "id": latest_log.id if latest_log else None,
+                    "started_at": latest_log.started_at.isoformat() if latest_log and latest_log.started_at else None,
+                    "status": latest_log.status if latest_log else None,
+                    "chain": latest_log.chain if latest_log else None,
+                    "tokens_saved": latest_log.tokens_saved if latest_log else 0,
+                    "duration_seconds": latest_log.duration_seconds if latest_log else None
+                } if latest_log else None,
+                "history": [
+                    {
+                        "id": log.id,
+                        "started_at": log.started_at.isoformat(),
+                        "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+                        "duration_seconds": log.duration_seconds,
+                        "status": log.status,
+                        "chain": log.chain,
+                        "tokens_scraped": log.tokens_scraped,
+                        "tokens_filtered": log.tokens_filtered,
+                        "tokens_saved": log.tokens_saved,
+                        "tokens_skipped": log.tokens_skipped,
+                        "filter_stats": {
+                            "by_market_cap": log.filtered_by_market_cap or 0,
+                            "by_liquidity": log.filtered_by_liquidity or 0,
+                            "by_age": log.filtered_by_age or 0
+                        },
+                        "error_message": log.error_message
+                    }
+                    for log in history_logs
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting scraper stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

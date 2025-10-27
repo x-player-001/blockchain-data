@@ -656,6 +656,11 @@ class ScraperConfig(Base):
     # 链配置
     enabled_chains = Column(JSONB, nullable=False, default=['bsc', 'solana'], comment="启用的链列表")
 
+    # 过滤条件
+    min_market_cap = Column(Numeric(20, 2), nullable=True, comment="最小市值（美元），为空则不过滤")
+    min_liquidity = Column(Numeric(20, 2), nullable=True, comment="最小流动性（美元），为空则不过滤")
+    max_token_age_days = Column(Integer, nullable=True, comment="最大代币年龄（天），为空则不过滤")
+
     # 爬取方法
     use_undetected_chrome = Column(Integer, nullable=False, default=0, comment="是否使用undetected-chrome（0=否，1=是）")
 
@@ -671,3 +676,51 @@ class ScraperConfig(Base):
 
     def __repr__(self):
         return f"<ScraperConfig top_n={self.top_n_per_chain} interval={self.scrape_interval_min}-{self.scrape_interval_max}>"
+
+
+class ScrapeLog(Base):
+    """爬取日志表 - 记录每次爬虫执行的情况"""
+
+    __tablename__ = "scrape_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # 执行时间
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True, comment="爬取开始时间")
+    completed_at = Column(DateTime, nullable=True, comment="爬取完成时间")
+    duration_seconds = Column(Integer, nullable=True, comment="爬取耗时（秒）")
+
+    # 执行状态
+    status = Column(String(20), nullable=False, default="running", comment="状态：running, success, failed")
+
+    # 链信息
+    chain = Column(String(20), nullable=True, index=True, comment="链名称：bsc, solana")
+
+    # 数量统计
+    tokens_scraped = Column(Integer, nullable=True, comment="爬取到的代币总数")
+    tokens_filtered = Column(Integer, nullable=True, comment="过滤后剩余的代币数")
+    tokens_saved = Column(Integer, nullable=True, comment="成功保存的代币数")
+    tokens_skipped = Column(Integer, nullable=True, comment="跳过的代币数")
+
+    # 过滤统计
+    filtered_by_market_cap = Column(Integer, nullable=True, default=0, comment="因市值被过滤的数量")
+    filtered_by_liquidity = Column(Integer, nullable=True, default=0, comment="因流动性被过滤的数量")
+    filtered_by_age = Column(Integer, nullable=True, default=0, comment="因年龄被过滤的数量")
+
+    # 错误信息
+    error_message = Column(String(1000), nullable=True, comment="错误信息（如果失败）")
+
+    # 配置快照（记录使用的配置）
+    config_snapshot = Column(JSONB, nullable=True, comment="本次爬取使用的配置快照")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_scrape_log_time", "started_at"),
+        Index("idx_scrape_log_status", "status"),
+        Index("idx_scrape_log_chain_time", "chain", "started_at"),
+    )
+
+    def __repr__(self):
+        return f"<ScrapeLog {self.status} at {self.started_at} chain={self.chain} saved={self.tokens_saved}>"

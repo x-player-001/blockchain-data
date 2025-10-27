@@ -50,8 +50,14 @@ async def scrape_dexscreener_task():
     使用 cloudscraper 或 undetected-chromedriver 爬取多链数据
     支持重试机制提高成功率
     """
+    from src.storage.models import ScrapeLog
+    from src.storage.db_manager import DatabaseManager
+    import uuid
+
     scraper = None
     monitor_service = None
+    scrape_log_id = None
+    db_manager = None
 
     try:
         logger.info("="*80)
@@ -85,6 +91,24 @@ async def scrape_dexscreener_task():
                    f"top_n_per_chain={config['top_n_per_chain']}, "
                    f"use_undetected_chrome={config['use_undetected_chrome']}")
 
+        # 2.5 创建 ScrapeLog 记录（状态：running）
+        start_time = datetime.utcnow()
+        db_manager = DatabaseManager()
+        scrape_log_id = str(uuid.uuid4())
+
+        async with db_manager.get_session() as session:
+            scrape_log = ScrapeLog(
+                id=scrape_log_id,
+                started_at=start_time,
+                status='running',
+                chain=','.join(config.get('enabled_chains', [])),  # 多链用逗号分隔
+                config_snapshot=config  # 保存配置快照
+            )
+            session.add(scrape_log)
+            await session.commit()
+
+        logger.info(f"📝 已创建抓取日志记录: {scrape_log_id}")
+
         # 3. 使用配置参数爬取
         scraper = MultiChainScraper()
 
@@ -95,6 +119,28 @@ async def scrape_dexscreener_task():
             top_n_per_chain=config['top_n_per_chain'],    # 从配置读取每条链取前N名
             use_undetected_chrome=config['use_undetected_chrome']  # 从配置读取爬取方法
         )
+
+        # 3.5 更新 ScrapeLog 记录（状态：success）
+        end_time = datetime.utcnow()
+        duration = int((end_time - start_time).total_seconds())
+
+        async with db_manager.get_session() as session:
+            scrape_log = await session.get(ScrapeLog, scrape_log_id)
+            if scrape_log:
+                scrape_log.completed_at = end_time
+                scrape_log.duration_seconds = duration
+                scrape_log.status = 'success'
+                scrape_log.tokens_saved = result.get('total_saved', 0)
+                scrape_log.tokens_skipped = result.get('total_skipped', 0)
+                # 从 chains 结果中计算 scraped 总数
+                total_scraped = sum(
+                    chain_result.get('scraped', 0)
+                    for chain_result in result.get('chains', {}).values()
+                )
+                scrape_log.tokens_scraped = total_scraped
+                await session.commit()
+
+        logger.info(f"✅ 已更新抓取日志: 耗时 {duration}秒")
 
         logger.info(
             f"爬取完成：总共保存 {result['total_saved']} 个代币到数据库，"
@@ -127,6 +173,26 @@ async def scrape_dexscreener_task():
 
     except Exception as e:
         logger.error(f"爬取任务失败: {e}", exc_info=True)
+
+        # 更新 ScrapeLog 记录（状态：failed）
+        if scrape_log_id and db_manager:
+            try:
+                end_time = datetime.utcnow()
+                duration = int((end_time - start_time).total_seconds())
+
+                async with db_manager.get_session() as session:
+                    scrape_log = await session.get(ScrapeLog, scrape_log_id)
+                    if scrape_log:
+                        scrape_log.completed_at = end_time
+                        scrape_log.duration_seconds = duration
+                        scrape_log.status = 'failed'
+                        scrape_log.error_message = str(e)[:1000]  # 限制长度
+                        await session.commit()
+
+                logger.info(f"❌ 已更新抓取日志: 失败，耗时 {duration}秒")
+            except Exception as log_error:
+                logger.error(f"更新失败日志时出错: {log_error}")
+
         # 即使失败也要调度下一次（使用默认配置）
         schedule_next_scrape()
 

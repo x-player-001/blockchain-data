@@ -1194,11 +1194,21 @@ class DexScreenerService:
         try:
             # 提取基本信息 (BSC 和 Solana 结构不同)
             if chain == 'bsc':
-                # BSC: parts[3]=名称, parts[5]=WBNB, parts[6]=符号
+                # BSC 有两种结构：
+                # 1. 正常：parts[3]=名称, parts[5]=base, parts[6]=符号
+                # 2. 简化（符号=名称）：parts[3]=符号, parts[5]=base, parts[6]=名称, parts[7]=$
                 if len(parts) > 6:
-                    token_data['token_name'] = parts[3]
-                    token_data['base_token'] = parts[5]
-                    token_data['token_symbol'] = parts[6]
+                    # 检查 parts[6] 是否是价格符号 $，判断是哪种结构
+                    if parts[6] == '$':
+                        # 简化结构：符号和名称相同
+                        token_data['token_symbol'] = parts[3]
+                        token_data['base_token'] = parts[5]
+                        token_data['token_name'] = parts[3]  # 使用符号作为名称
+                    else:
+                        # 正常结构
+                        token_data['token_name'] = parts[3]
+                        token_data['base_token'] = parts[5]
+                        token_data['token_symbol'] = parts[6]
             else:  # solana
                 # Solana 有多种格式，需要检测 DEX 类型标记
                 dex_types = ['CPMM', 'CLMM', 'DLMM', 'DYN', 'DYN2', 'wp', 'v2', 'v3']
@@ -1252,7 +1262,8 @@ class DexScreenerService:
                     except:
                         pass
 
-            # 找连续的4个百分比
+            # 找连续的4个百分比（5m, 1h, 6h, 24h）
+            found_4_percent = False
             if len(percent_positions) >= 4:
                 for i in range(len(percent_positions) - 3):
                     pos1, val1 = percent_positions[i]
@@ -1265,6 +1276,21 @@ class DexScreenerService:
                         token_data['price_change_1h'] = val2
                         token_data['price_change_6h'] = val3
                         token_data['price_change_24h'] = val4
+                        found_4_percent = True
+                        break
+
+            # 如果找不到4个连续百分比，尝试找3个（1h, 6h, 24h）
+            if not found_4_percent and len(percent_positions) >= 3:
+                for i in range(len(percent_positions) - 2):
+                    pos1, val1 = percent_positions[i]
+                    pos2, val2 = percent_positions[i + 1]
+                    pos3, val3 = percent_positions[i + 2]
+
+                    if (pos2 - pos1 <= 2 and pos3 - pos2 <= 2):
+                        # 3个百分比：1h, 6h, 24h（缺少5m）
+                        token_data['price_change_1h'] = val1
+                        token_data['price_change_6h'] = val2
+                        token_data['price_change_24h'] = val3
                         break
 
             # 提取市值、流动性、FDV
@@ -1514,23 +1540,12 @@ class DexScreenerService:
                 page_source = driver.page_source
                 logger.debug(f"页面源码长度: {len(page_source):,} 字符")
 
-                # 保存HTML用于调试
-                debug_file = f'/tmp/dexscreener_{chain}_success.html'
-                with open(debug_file, 'w', encoding='utf-8') as f:
-                    f.write(page_source)
-                logger.info(f"页面HTML已保存到: {debug_file}")
-
                 # 解析 HTML
                 soup = BeautifulSoup(page_source, 'html.parser')
                 token_rows = soup.select('a.ds-dex-table-row')
 
                 if not token_rows:
                     logger.warning("未找到代币行，可能仍被拦截")
-                    # 保存HTML用于调试
-                    debug_file = f'/tmp/dexscreener_{chain}_debug.html'
-                    with open(debug_file, 'w', encoding='utf-8') as f:
-                        f.write(page_source)
-                    logger.info(f"页面HTML已保存到: {debug_file}")
                     continue
 
                 logger.info(f"找到 {len(token_rows)} 个代币行")

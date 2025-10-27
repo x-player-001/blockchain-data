@@ -31,7 +31,9 @@ from src.api.schemas import (
     UpdateAlertThresholdsRequest,
     ScrapeTopGainersRequest,
     ScrapeTopGainersResponse,
-    UpdateMonitoredPricesResponse
+    UpdateMonitoredPricesResponse,
+    KlineResponse,
+    KlineListResponse
 )
 from src.api.services import (
     get_tokens,
@@ -1362,4 +1364,100 @@ async def get_monitor_stats(limit: int = Query(20, ge=1, le=100)):
             }
     except Exception as e:
         logger.error(f"Error getting monitor stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== K线数据 API ====================
+
+@app.get("/api/klines", response_model=KlineListResponse)
+async def get_klines(
+    token_address: Optional[str] = Query(None, description="代币地址"),
+    pair_address: Optional[str] = Query(None, description="交易对地址"),
+    timeframe: str = Query("minute", description="时间周期: minute/hour/day"),
+    aggregate: int = Query(5, ge=1, description="聚合级别: 1/5/15/30/60等"),
+    limit: int = Query(100, ge=1, le=1000, description="返回数量，最大1000"),
+    start_time: Optional[int] = Query(None, description="开始时间戳（秒）"),
+    end_time: Optional[int] = Query(None, description="结束时间戳（秒）")
+):
+    """
+    查询代币K线数据
+
+    参数：
+    - token_address: 代币地址（与 pair_address 二选一）
+    - pair_address: 交易对地址（与 token_address 二选一）
+    - timeframe: 时间周期（minute/hour/day）
+    - aggregate: 聚合级别（1/5/15/30/60等）
+    - limit: 返回数量，最大1000
+    - start_time: 开始时间戳（秒）
+    - end_time: 结束时间戳（秒）
+
+    返回按时间戳倒序排列（最新的在前）
+    """
+    from src.storage.models import TokenKline
+    from src.storage.db_manager import DatabaseManager
+    from sqlalchemy import select, and_, desc
+
+    # 至少需要提供一个地址参数
+    if not token_address and not pair_address:
+        raise HTTPException(
+            status_code=400,
+            detail="token_address 和 pair_address 必须至少提供一个"
+        )
+
+    db = DatabaseManager()
+    try:
+        async with db.get_session() as session:
+            # 构建查询条件
+            conditions = [
+                TokenKline.timeframe == timeframe,
+                TokenKline.aggregate == aggregate
+            ]
+
+            if token_address:
+                conditions.append(TokenKline.token_address == token_address.lower())
+            if pair_address:
+                conditions.append(TokenKline.pair_address == pair_address.lower())
+            if start_time:
+                conditions.append(TokenKline.timestamp >= start_time)
+            if end_time:
+                conditions.append(TokenKline.timestamp <= end_time)
+
+            # 执行查询
+            result = await session.execute(
+                select(TokenKline)
+                .where(and_(*conditions))
+                .order_by(desc(TokenKline.timestamp))
+                .limit(limit)
+            )
+            klines = result.scalars().all()
+
+            # 格式化响应
+            kline_list = [
+                {
+                    "id": k.id,
+                    "token_address": k.token_address,
+                    "pair_address": k.pair_address,
+                    "chain": k.chain,
+                    "timestamp": k.timestamp,
+                    "timeframe": k.timeframe,
+                    "aggregate": k.aggregate,
+                    "open": str(k.open),
+                    "high": str(k.high),
+                    "low": str(k.low),
+                    "close": str(k.close),
+                    "volume": str(k.volume),
+                    "data_source": k.data_source,
+                    "created_at": k.created_at,
+                    "updated_at": k.updated_at
+                }
+                for k in klines
+            ]
+
+            return KlineListResponse(
+                total=len(kline_list),
+                data=kline_list
+            )
+
+    except Exception as e:
+        logger.error(f"Error getting klines: {e}")
         raise HTTPException(status_code=500, detail=str(e))

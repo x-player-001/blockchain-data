@@ -556,3 +556,37 @@ class UpdateMonitoredPricesResponse(BaseModel):
     updated: int = Field(..., description="已更新数量")
     alerts_triggered: int = Field(..., description="触发报警数量")
     total_monitored: int = Field(..., description="总监控数量")
+
+
+# ==================== K线相关 Schema ====================
+
+class KlineResponse(BaseModel):
+    """K线数据响应"""
+    id: str = Field(..., description="K线ID")
+    token_address: str = Field(..., description="代币地址")
+    pair_address: str = Field(..., description="交易对地址")
+    chain: str = Field(..., description="链名称")
+    timestamp: int = Field(..., description="K线时间戳(秒)")
+    timeframe: str = Field(..., description="时间周期")
+    aggregate: int = Field(..., description="聚合级别")
+    open: str = Field(..., description="开盘价")
+    high: str = Field(..., description="最高价")
+    low: str = Field(..., description="最低价")
+    close: str = Field(..., description="收盘价")
+    volume: str = Field(..., description="成交量")
+    data_source: str = Field(..., description="数据来源")
+    created_at: datetime = Field(..., description="创建时间")
+    updated_at: datetime = Field(..., description="更新时间")
+
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            Decimal: str,
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class KlineListResponse(BaseModel):
+    """K线列表响应"""
+    total: int = Field(..., description="总数量")
+    data: List[KlineResponse] = Field(..., description="K线数据列表")

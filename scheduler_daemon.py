@@ -25,6 +25,7 @@ from apscheduler.triggers.date import DateTrigger
 
 from src.services.token_monitor_service import TokenMonitorService
 from src.services.multi_chain_scraper import MultiChainScraper
+from src.services.kline_service import KlineService
 
 # 配置日志
 logging.basicConfig(
@@ -397,6 +398,41 @@ async def monitor_prices_task():
                 pass
 
 
+async def update_klines_task():
+    """
+    更新K线数据任务（每1小时）
+    拉取所有监控代币和潜力代币的K线数据
+    """
+    kline_service = None
+
+    try:
+        logger.info("="*80)
+        logger.info("开始更新K线数据...")
+        logger.info("="*80)
+
+        kline_service = KlineService()
+
+        # 调用统一更新方法（内部自动限流）
+        result = await kline_service.update_all_tokens_klines(
+            timeframe="minute",
+            aggregate=5,
+            max_candles=500
+        )
+
+        logger.info("="*80)
+        logger.info("✅ K线数据更新完成")
+        logger.info(f"  监控代币: {result['monitored']} 个")
+        logger.info(f"  潜力代币: {result['potential']} 个")
+        logger.info(f"  总代币数: {result['total']} 个")
+        logger.info(f"  成功: {result['success']} 个，失败: {result['failed']} 个")
+        logger.info(f"  拉取: {result['fetched']} 根，保存: {result['saved']} 根")
+        logger.info(f"  耗时: {result.get('duration', 0):.2f} 秒")
+        logger.info("="*80)
+
+    except Exception as e:
+        logger.error(f"❌ 更新K线数据时出错: {e}", exc_info=True)
+
+
 def shutdown_handler(signum, frame):
     """
     优雅关闭处理
@@ -496,6 +532,18 @@ async def main():
         )
         logger.info("✅ 已启用任务：每5分钟监控代币价格")
 
+        # K线更新任务：每1小时执行一次
+        scheduler.add_job(
+            update_klines_task,
+            trigger=IntervalTrigger(hours=1),
+            id='update_klines',
+            name='更新K线数据',
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300  # 允许5分钟的延迟
+        )
+        logger.info("✅ 已启用任务：每1小时更新K线数据")
+
     # 启动调度器
     scheduler.start()
 
@@ -504,6 +552,7 @@ async def main():
         logger.info("  - 随机间隔9-15分钟爬取 DexScreener 首页（BSC + Solana，支持重试机制）")
     if enable_monitor:
         logger.info("  - 每5分钟监控代币价格（更新 monitored_tokens 表并触发报警 + 更新 potential_tokens AVE 数据）")
+        logger.info("  - 每1小时更新K线数据（监控代币 + 潜力代币，5分钟K线）")
     logger.info("="*80)
 
     # 启动时立即执行一次任务
@@ -514,6 +563,10 @@ async def main():
     if enable_monitor:
         logger.info("立即执行一次监控任务...")
         await monitor_prices_task()
+
+        # 启动时也立即执行一次K线更新
+        logger.info("立即执行一次K线更新任务...")
+        await update_klines_task()
 
     # 保持运行
     try:

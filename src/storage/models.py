@@ -572,6 +572,10 @@ class MonitoredToken(Base):
     deleted_at = Column(DateTime, nullable=True)  # Soft delete timestamp
     permanently_deleted = Column(Integer, nullable=False, default=0)  # 0=normal, 1=permanently deleted (不返回前端)
 
+    # Removal tracking
+    removal_reason = Column(String(50), nullable=True, comment="删除原因: low_market_cap, low_liquidity, manual, other")
+    removal_threshold_value = Column(Numeric(30, 2), nullable=True, comment="触发删除的阈值（市值或流动性）")
+
     # Relationships
     alerts = relationship("PriceAlert", back_populates="monitored_token", cascade="all, delete-orphan")
 
@@ -724,3 +728,82 @@ class ScrapeLog(Base):
 
     def __repr__(self):
         return f"<ScrapeLog {self.status} at {self.started_at} chain={self.chain} saved={self.tokens_saved}>"
+
+
+class MonitorConfig(Base):
+    """监控配置表 - 存储监控任务参数配置"""
+
+    __tablename__ = "monitor_config"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # 筛选阈值
+    min_monitor_market_cap = Column(Numeric(20, 2), nullable=True, comment="最小市值（美元），低于此值自动删除")
+    min_monitor_liquidity = Column(Numeric(20, 2), nullable=True, comment="最小流动性（美元），低于此值自动删除")
+
+    # 更新频率
+    update_interval_minutes = Column(Integer, nullable=False, default=5, comment="更新间隔（分钟）")
+
+    # 报警设置
+    default_drop_threshold = Column(Numeric(5, 2), nullable=False, default=20.0, comment="默认跌幅阈值（%）")
+    default_alert_thresholds = Column(JSONB, nullable=False, default=[70, 80, 90], comment="默认多级报警阈值")
+
+    # 其他配置
+    enabled = Column(Integer, nullable=False, default=1, comment="是否启用监控（0=禁用，1=启用）")
+    max_retry_count = Column(Integer, nullable=False, default=3, comment="AVE API调用失败重试次数")
+    batch_size = Column(Integer, nullable=False, default=10, comment="每批次处理的代币数量")
+
+    # 时间戳
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # 备注
+    description = Column(String(500), nullable=True, comment="配置说明")
+
+    def __repr__(self):
+        return f"<MonitorConfig min_mc={self.min_monitor_market_cap} min_liq={self.min_monitor_liquidity}>"
+
+
+class MonitorLog(Base):
+    """监控日志表 - 记录每次监控任务执行的情况"""
+
+    __tablename__ = "monitor_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # 执行时间
+    started_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True, comment="监控开始时间")
+    completed_at = Column(DateTime, nullable=True, comment="监控完成时间")
+    duration_seconds = Column(Integer, nullable=True, comment="监控耗时（秒）")
+
+    # 执行状态
+    status = Column(String(20), nullable=False, default="running", comment="状态：running, success, failed")
+
+    # 数量统计
+    tokens_monitored = Column(Integer, nullable=True, comment="监控的代币总数")
+    tokens_updated = Column(Integer, nullable=True, comment="成功更新的代币数")
+    tokens_failed = Column(Integer, nullable=True, comment="更新失败的代币数")
+    tokens_auto_removed = Column(Integer, nullable=True, comment="自动删除的代币数")
+    alerts_triggered = Column(Integer, nullable=True, comment="触发的报警数量")
+
+    # 删除统计
+    removed_by_market_cap = Column(Integer, nullable=True, default=0, comment="因市值过低被删除的数量")
+    removed_by_liquidity = Column(Integer, nullable=True, default=0, comment="因流动性过低被删除的数量")
+    removed_by_other = Column(Integer, nullable=True, default=0, comment="其他原因删除的数量")
+
+    # 错误信息
+    error_message = Column(String(1000), nullable=True, comment="错误信息（如果失败）")
+
+    # 配置快照（记录使用的配置）
+    config_snapshot = Column(JSONB, nullable=True, comment="本次监控使用的配置快照")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Indexes
+    __table_args__ = (
+        Index("idx_monitor_log_time", "started_at"),
+        Index("idx_monitor_log_status", "status"),
+    )
+
+    def __repr__(self):
+        return f"<MonitorLog {self.status} at {self.started_at} updated={self.tokens_updated}>"

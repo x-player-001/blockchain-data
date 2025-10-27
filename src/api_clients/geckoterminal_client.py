@@ -254,7 +254,8 @@ class GeckoTerminalClient(BaseAPIClient):
         pool_address: str,
         timeframe: str = "day",
         aggregate: int = 1,
-        before_timestamp: Optional[int] = None
+        before_timestamp: Optional[int] = None,
+        network: str = "bsc"
     ) -> List[List[float]]:
         """
         Get OHLCV (candlestick) data for a pool.
@@ -264,11 +265,13 @@ class GeckoTerminalClient(BaseAPIClient):
             timeframe: Time period (minute, hour, day)
             aggregate: Aggregation level (1, 5, 15 for minute; 1, 4, 12 for hour; 1 for day)
             before_timestamp: Get data before this Unix timestamp
+            network: Network name (bsc, solana, eth, etc.)
 
         Returns:
             List of OHLCV data: [[timestamp, open, high, low, close, volume], ...]
         """
-        endpoint = f"/networks/bsc/pools/{pool_address}/ohlcv/{timeframe}"
+        # GeckoTerminal uses 'solana' for Solana, 'bsc' for BSC, etc.
+        endpoint = f"/networks/{network}/pools/{pool_address}/ohlcv/{timeframe}"
 
         params = []
         if aggregate > 1:
@@ -294,7 +297,8 @@ class GeckoTerminalClient(BaseAPIClient):
         pool_address: str,
         timeframe: str = "day",
         max_candles: int = 1000,
-        aggregate: int = 1
+        aggregate: int = 1,
+        network: str = "bsc"
     ) -> List[List[float]]:
         """
         Get historical OHLCV data by paginating through before_timestamp.
@@ -304,6 +308,7 @@ class GeckoTerminalClient(BaseAPIClient):
             timeframe: Time period (minute, hour, day)
             max_candles: Maximum number of candles to fetch (default: 1000)
             aggregate: Aggregation level (1, 5, 15 for minute; 1, 4, 12 for hour; 1 for day)
+            network: Network name (bsc, solana, eth, etc.)
 
         Returns:
             List of OHLCV data: [[timestamp, open, high, low, close, volume], ...]
@@ -313,7 +318,7 @@ class GeckoTerminalClient(BaseAPIClient):
         fetch_count = 0
         max_iterations = (max_candles // 100) + 1
 
-        logger.info(f"Fetching up to {max_candles} historical candles for {pool_address} ({timeframe}, agg={aggregate})")
+        logger.info(f"Fetching up to {max_candles} historical candles for {pool_address} on {network} ({timeframe}, agg={aggregate})")
 
         while fetch_count < max_iterations:
             # Fetch batch
@@ -321,7 +326,8 @@ class GeckoTerminalClient(BaseAPIClient):
                 pool_address=pool_address,
                 timeframe=timeframe,
                 aggregate=aggregate,
-                before_timestamp=before_timestamp
+                before_timestamp=before_timestamp,
+                network=network
             )
 
             if not candles:

@@ -196,7 +196,8 @@ class KlineService:
                     klines = await self.client.get_ohlcv(
                         pool_address=pair_address,
                         timeframe=timeframe,
-                        aggregate=aggregate
+                        aggregate=aggregate,
+                        network=chain
                     )
 
                     # 过滤：只保留比最新时间戳更新的K线
@@ -206,13 +207,14 @@ class KlineService:
                 else:
                     # 首次拉取：获取历史数据
                     logger.info(
-                        f"{token_address[:8]}... 首次拉取K线，最多 {max_candles} 根"
+                        f"{token_address[:8]}... 首次拉取K线，最多 {max_candles} 根 (链: {chain})"
                     )
                     klines = await self.client.get_ohlcv_historical(
                         pool_address=pair_address,
                         timeframe=timeframe,
                         max_candles=max_candles,
-                        aggregate=aggregate
+                        aggregate=aggregate,
+                        network=chain
                     )
 
                 if not klines:

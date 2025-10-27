@@ -344,6 +344,27 @@ async def monitor_prices_task():
                 f"潜力代币更新完成：成功 {potential_result.get('updated', 0)} 个，"
                 f"失败 {potential_result.get('failed', 0)} 个"
             )
+
+            # 如果潜力代币有删除，累加到监控日志统计中
+            potential_removed = potential_result.get('removed', 0)
+            if potential_removed > 0:
+                logger.info(
+                    f"自动删除潜力代币 {potential_removed} 个 "
+                    f"(市值: {potential_result.get('removed_by_market_cap', 0)}, "
+                    f"流动性: {potential_result.get('removed_by_liquidity', 0)})"
+                )
+
+                # 更新 monitor_log，累加潜力代币的删除统计
+                async with db_manager.get_session() as session:
+                    monitor_log = await session.get(MonitorLog, monitor_log_id)
+                    if monitor_log:
+                        monitor_log.tokens_auto_removed += potential_removed
+                        monitor_log.removed_by_market_cap += potential_result.get('removed_by_market_cap', 0)
+                        monitor_log.removed_by_liquidity += potential_result.get('removed_by_liquidity', 0)
+                        await session.commit()
+
+                logger.info(f"✅ 已累加潜力代币删除统计到监控日志")
+
         logger.info("="*80)
 
     except Exception as e:

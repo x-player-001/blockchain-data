@@ -1317,10 +1317,10 @@ class DexScreenerService:
                     except:
                         pass
 
-            # 提取 age（年龄字段，格式：21h, 5d, 2m, 1mo）
+            # 提取 age（年龄字段，格式：21m, 17h, 5d, 2mo, 1y）
             import re
             for part in parts:
-                # 匹配格式：数字 + 单位 (h=小时, d=天, mo=月, m=月, y=年)
+                # 匹配格式：数字 + 单位 (m=分钟, h=小时, d=天, mo=月, y=年)
                 # 注意：mo 要在 m 之前匹配，避免 "5mo" 被识别为 "5m"
                 age_match = re.match(r'^(\d+)(mo|h|d|m|y)$', part.strip())
                 if age_match:
@@ -1329,11 +1329,13 @@ class DexScreenerService:
                     token_data['age'] = part.strip()
 
                     # 转换为天数
-                    if unit == 'h':  # 小时
+                    if unit == 'm':  # 分钟
+                        token_data['age_days'] = value / (24.0 * 60.0)
+                    elif unit == 'h':  # 小时
                         token_data['age_days'] = value / 24.0
                     elif unit == 'd':  # 天
                         token_data['age_days'] = float(value)
-                    elif unit == 'm' or unit == 'mo':  # 月
+                    elif unit == 'mo':  # 月
                         token_data['age_days'] = value * 30.0
                     elif unit == 'y':  # 年
                         token_data['age_days'] = value * 365.0

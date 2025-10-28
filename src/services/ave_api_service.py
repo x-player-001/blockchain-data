@@ -3,6 +3,7 @@ AVE API Service
 用于调用AVE API获取详细的代币和交易对信息
 """
 
+import os
 import requests
 from typing import Dict, Optional, Any
 from datetime import datetime
@@ -16,12 +17,33 @@ class AveApiService:
     """AVE API服务类"""
 
     BASE_URL = "https://prod.ave-api.com/v2"
-    API_KEY = "REMOVED_FOR_SECURITY"
 
-    def __init__(self):
-        """初始化AVE API服务"""
-        self.headers = {
-            'X-API-KEY': self.API_KEY,
+    def __init__(self, api_key: Optional[str] = None):
+        """
+        初始化AVE API服务
+
+        Args:
+            api_key: AVE API密钥，如果不提供则从环境变量AVE_API_KEY读取
+        """
+        self.api_key = api_key or os.getenv("AVE_API_KEY")
+
+    def _get_headers(self) -> Dict[str, str]:
+        """
+        获取请求头，并验证API密钥
+
+        Returns:
+            包含API密钥的请求头
+
+        Raises:
+            ValueError: 如果API密钥未设置
+        """
+        if not self.api_key:
+            raise ValueError(
+                "AVE_API_KEY is required. Please set it in .env file or pass as parameter when initializing AveApiService."
+            )
+
+        return {
+            'X-API-KEY': self.api_key,
             'Content-Type': 'application/json'
         }
 
@@ -41,7 +63,7 @@ class AveApiService:
         url = f"{self.BASE_URL}/pairs/{pair_id}"
 
         try:
-            response = requests.get(url, headers=self.headers, timeout=10)
+            response = requests.get(url, headers=self._get_headers(), timeout=10)
 
             if response.status_code == 200:
                 data = response.json()

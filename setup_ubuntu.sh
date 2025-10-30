@@ -4,6 +4,7 @@ set -e
 echo "=========================================="
 echo "Blockchain Data 项目环境一键配置"
 echo "系统: Ubuntu 24.04 LTS"
+echo "注意: 请先安装 git 并克隆项目代码"
 echo "=========================================="
 echo ""
 
@@ -20,6 +21,16 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# 获取项目路径
+read -p "请输入项目路径 [默认: /root/blockchain-data]: " PROJECT_DIR
+PROJECT_DIR=${PROJECT_DIR:-/root/blockchain-data}
+
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo -e "${RED}错误: 项目目录不存在: $PROJECT_DIR${NC}"
+    echo "请先使用 git clone 克隆项目代码"
+    exit 1
+fi
+
 # 获取配置
 read -p "请输入数据库密码 [默认: blockchain123]: " DB_PASSWORD
 DB_PASSWORD=${DB_PASSWORD:-blockchain123}
@@ -32,18 +43,17 @@ echo -e "${GREEN}开始安装...${NC}"
 echo ""
 
 # ==========================================
-# 1. 系统更新
+# 1. 更新包列表
 # ==========================================
-echo -e "${GREEN}[1/9] 更新系统...${NC}"
+echo -e "${GREEN}[1/7] 更新包列表...${NC}"
 apt update
-apt upgrade -y
 
 # ==========================================
 # 2. 安装基础工具
 # ==========================================
-echo -e "${GREEN}[2/9] 安装基础工具...${NC}"
+echo -e "${GREEN}[2/7] 安装基础工具...${NC}"
 apt install -y \
-    wget curl git vim tmux \
+    wget curl vim \
     build-essential \
     software-properties-common \
     ca-certificates \
@@ -53,7 +63,7 @@ apt install -y \
 # ==========================================
 # 3. 安装 Python 3.11+
 # ==========================================
-echo -e "${GREEN}[3/9] 安装 Python 3.11...${NC}"
+echo -e "${GREEN}[3/7] 安装 Python 3.11...${NC}"
 apt install -y python3 python3-pip python3-venv python3-dev
 
 # 验证版本
@@ -66,7 +76,7 @@ python3 -m pip install --upgrade pip
 # ==========================================
 # 4. 安装 Node.js 20 LTS
 # ==========================================
-echo -e "${GREEN}[4/10] 安装 Node.js 20 LTS...${NC}"
+echo -e "${GREEN}[4/7] 安装 Node.js 20 LTS...${NC}"
 
 # 添加 NodeSource 仓库
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
@@ -85,7 +95,7 @@ echo -e "${GREEN}Node.js 安装完成${NC}"
 # ==========================================
 # 5. 安装 PostgreSQL 16
 # ==========================================
-echo -e "${GREEN}[5/10] 安装 PostgreSQL 16...${NC}"
+echo -e "${GREEN}[5/7] 安装 PostgreSQL 16...${NC}"
 
 # 添加 PostgreSQL 官方源
 sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
@@ -104,7 +114,7 @@ echo -e "${GREEN}PostgreSQL 安装完成${NC}"
 # ==========================================
 # 6. 创建数据库和用户
 # ==========================================
-echo -e "${GREEN}[6/10] 创建数据库...${NC}"
+echo -e "${GREEN}[6/7] 创建数据库...${NC}"
 
 sudo -u postgres psql <<EOF
 -- 创建数据库
@@ -144,7 +154,7 @@ fi
 # ==========================================
 # 7. 安装 Google Chrome
 # ==========================================
-echo -e "${GREEN}[7/10] 安装 Google Chrome...${NC}"
+echo -e "${GREEN}[7/7] 安装 Google Chrome...${NC}"
 
 wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 apt install -y /tmp/google-chrome-stable_current_amd64.deb
@@ -156,37 +166,19 @@ google-chrome --version
 echo -e "${GREEN}Chrome 安装完成${NC}"
 
 # ==========================================
-# 8. 克隆项目（如果不存在）
+# 8. 安装 Python 依赖
 # ==========================================
-echo -e "${GREEN}[8/10] 配置项目...${NC}"
-
-PROJECT_DIR="/root/blockchain-data"
-
-if [ ! -d "$PROJECT_DIR" ]; then
-    echo "克隆项目代码..."
-    cd /root
-    git clone https://github.com/x-player-001/blockchain-data.git
-else
-    echo "项目目录已存在，更新代码..."
-    cd "$PROJECT_DIR"
-    git pull origin main
-fi
+echo -e "${GREEN}[8/9] 安装 Python 依赖...${NC}"
 
 cd "$PROJECT_DIR"
-
-# ==========================================
-# 9. 安装 Python 依赖
-# ==========================================
-echo -e "${GREEN}[9/10] 安装 Python 依赖...${NC}"
-
 python3 -m pip install -r requirements.txt
 
 echo -e "${GREEN}依赖安装完成${NC}"
 
 # ==========================================
-# 10. 创建配置文件
+# 9. 创建配置文件
 # ==========================================
-echo -e "${GREEN}[10/10] 创建配置文件...${NC}"
+echo -e "${GREEN}[9/9] 创建配置文件...${NC}"
 
 # 创建 .env 文件
 cat > "$PROJECT_DIR/.env" <<EOF
@@ -226,11 +218,9 @@ EOF
 
 echo -e "${GREEN}配置文件创建完成${NC}"
 
-# ==========================================
-# 11. 初始化数据库表
-# ==========================================
-echo -e "${GREEN}[11/10] 初始化数据库表...${NC}"
-
+# 初始化数据库表
+echo ""
+echo "初始化数据库表..."
 cd "$PROJECT_DIR"
 python3 -c "import asyncio; from src.storage.db_manager import DatabaseManager; asyncio.run(DatabaseManager().init_db())" || {
     echo -e "${YELLOW}警告: 数据库初始化失败，请手动运行${NC}"
@@ -258,17 +248,14 @@ echo ""
 echo "1. 编辑 .env 文件，填入 API keys:"
 echo "   vim $PROJECT_DIR/.env"
 echo ""
-echo "2. 手动启动 API 服务:"
+echo "2. 启动 API 服务:"
 echo "   cd $PROJECT_DIR"
-echo "   tmux new -s blockchain-api -d 'python3 run_api.py'"
+echo "   python3 run_api.py"
 echo ""
-echo "3. 手动启动定时任务:"
-echo "   tmux new -s blockchain-scheduler -d 'cd $PROJECT_DIR && python3 scheduler_daemon.py'"
+echo "3. 启动定时任务:"
+echo "   python3 scheduler_daemon.py"
 echo ""
-echo "4. 查看服务状态:"
-echo "   tmux ls"
-echo ""
-echo "5. 测试 API:"
+echo "4. 测试 API:"
 echo "   curl http://localhost:$API_PORT/docs"
 echo ""
 echo -e "${YELLOW}注意: 请修改 .env 文件中的 AVE_API_KEY!${NC}"

@@ -70,8 +70,8 @@ apt install -y --no-upgrade python3 python3-pip python3-venv python3-dev
 PYTHON_VERSION=$(python3 --version)
 echo "Python 版本: $PYTHON_VERSION"
 
-# 升级 pip
-python3 -m pip install --upgrade pip
+# 升级 pip（Ubuntu 24.04 需要 --break-system-packages）
+python3 -m pip install --upgrade pip --break-system-packages
 
 # ==========================================
 # 4. 安装 Node.js 20 LTS
@@ -171,7 +171,7 @@ echo -e "${GREEN}Chrome 安装完成${NC}"
 echo -e "${GREEN}[8/9] 安装 Python 依赖...${NC}"
 
 cd "$PROJECT_DIR"
-python3 -m pip install -r requirements.txt
+python3 -m pip install -r requirements.txt --break-system-packages
 
 echo -e "${GREEN}依赖安装完成${NC}"
 

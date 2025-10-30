@@ -19,9 +19,14 @@ if __name__ == "__main__":
     print(f"📖 ReDoc 文档: http://localhost:{PORT}/redoc")
     print("=" * 60)
 
+    # 从环境变量读取监听地址
+    # 生产环境：使用 0.0.0.0 + 防火墙限制特定IP访问
+    # 纯本地环境：使用 127.0.0.1
+    HOST = os.getenv("API_HOST", "0.0.0.0")
+
     uvicorn.run(
         app,
-        host="127.0.0.1",  # 只监听本地连接，拒绝外部访问
+        host=HOST,
         port=PORT,
         log_level="info"
     )

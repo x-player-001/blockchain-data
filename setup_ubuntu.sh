@@ -52,7 +52,7 @@ apt update
 # 2. 安装基础工具
 # ==========================================
 echo -e "${GREEN}[2/7] 安装基础工具...${NC}"
-apt install -y \
+apt install -y --no-upgrade \
     wget curl vim \
     build-essential \
     software-properties-common \
@@ -64,7 +64,7 @@ apt install -y \
 # 3. 安装 Python 3.11+
 # ==========================================
 echo -e "${GREEN}[3/7] 安装 Python 3.11...${NC}"
-apt install -y python3 python3-pip python3-venv python3-dev
+apt install -y --no-upgrade python3 python3-pip python3-venv python3-dev
 
 # 验证版本
 PYTHON_VERSION=$(python3 --version)
@@ -82,7 +82,7 @@ echo -e "${GREEN}[4/7] 安装 Node.js 20 LTS...${NC}"
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 
 # 安装 Node.js
-apt install -y nodejs
+apt install -y --no-upgrade nodejs
 
 # 验证安装
 NODE_VERSION=$(node --version)
@@ -103,7 +103,7 @@ wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key a
 apt update
 
 # 安装 PostgreSQL
-apt install -y postgresql-16 postgresql-contrib-16
+apt install -y --no-upgrade postgresql-16 postgresql-contrib-16
 
 # 启动服务
 systemctl enable postgresql
@@ -157,7 +157,7 @@ fi
 echo -e "${GREEN}[7/7] 安装 Google Chrome...${NC}"
 
 wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-apt install -y /tmp/google-chrome-stable_current_amd64.deb
+apt install -y --no-upgrade /tmp/google-chrome-stable_current_amd64.deb
 rm /tmp/google-chrome-stable_current_amd64.deb
 
 # 验证安装

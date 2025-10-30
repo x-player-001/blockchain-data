@@ -64,9 +64,28 @@ echo "Python 版本: $PYTHON_VERSION"
 python3 -m pip install --upgrade pip
 
 # ==========================================
-# 4. 安装 PostgreSQL 16
+# 4. 安装 Node.js 20 LTS
 # ==========================================
-echo -e "${GREEN}[4/9] 安装 PostgreSQL 16...${NC}"
+echo -e "${GREEN}[4/10] 安装 Node.js 20 LTS...${NC}"
+
+# 添加 NodeSource 仓库
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+
+# 安装 Node.js
+apt install -y nodejs
+
+# 验证安装
+NODE_VERSION=$(node --version)
+NPM_VERSION=$(npm --version)
+echo "Node.js 版本: $NODE_VERSION"
+echo "npm 版本: $NPM_VERSION"
+
+echo -e "${GREEN}Node.js 安装完成${NC}"
+
+# ==========================================
+# 5. 安装 PostgreSQL 16
+# ==========================================
+echo -e "${GREEN}[5/10] 安装 PostgreSQL 16...${NC}"
 
 # 添加 PostgreSQL 官方源
 sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
@@ -83,9 +102,9 @@ systemctl start postgresql
 echo -e "${GREEN}PostgreSQL 安装完成${NC}"
 
 # ==========================================
-# 5. 创建数据库和用户
+# 6. 创建数据库和用户
 # ==========================================
-echo -e "${GREEN}[5/9] 创建数据库...${NC}"
+echo -e "${GREEN}[6/10] 创建数据库...${NC}"
 
 sudo -u postgres psql <<EOF
 -- 创建数据库
@@ -123,9 +142,9 @@ EOF
 fi
 
 # ==========================================
-# 6. 安装 Google Chrome
+# 7. 安装 Google Chrome
 # ==========================================
-echo -e "${GREEN}[6/9] 安装 Google Chrome...${NC}"
+echo -e "${GREEN}[7/10] 安装 Google Chrome...${NC}"
 
 wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
 apt install -y /tmp/google-chrome-stable_current_amd64.deb
@@ -137,9 +156,9 @@ google-chrome --version
 echo -e "${GREEN}Chrome 安装完成${NC}"
 
 # ==========================================
-# 7. 克隆项目（如果不存在）
+# 8. 克隆项目（如果不存在）
 # ==========================================
-echo -e "${GREEN}[7/9] 配置项目...${NC}"
+echo -e "${GREEN}[8/10] 配置项目...${NC}"
 
 PROJECT_DIR="/root/blockchain-data"
 
@@ -156,18 +175,18 @@ fi
 cd "$PROJECT_DIR"
 
 # ==========================================
-# 8. 安装 Python 依赖
+# 9. 安装 Python 依赖
 # ==========================================
-echo -e "${GREEN}[8/9] 安装 Python 依赖...${NC}"
+echo -e "${GREEN}[9/10] 安装 Python 依赖...${NC}"
 
 python3 -m pip install -r requirements.txt
 
 echo -e "${GREEN}依赖安装完成${NC}"
 
 # ==========================================
-# 9. 创建配置文件
+# 10. 创建配置文件
 # ==========================================
-echo -e "${GREEN}[9/9] 创建配置文件...${NC}"
+echo -e "${GREEN}[10/10] 创建配置文件...${NC}"
 
 # 创建 .env 文件
 cat > "$PROJECT_DIR/.env" <<EOF
@@ -208,9 +227,9 @@ EOF
 echo -e "${GREEN}配置文件创建完成${NC}"
 
 # ==========================================
-# 10. 初始化数据库表
+# 11. 初始化数据库表
 # ==========================================
-echo -e "${GREEN}初始化数据库表...${NC}"
+echo -e "${GREEN}[11/10] 初始化数据库表...${NC}"
 
 cd "$PROJECT_DIR"
 python3 -c "import asyncio; from src.storage.db_manager import DatabaseManager; asyncio.run(DatabaseManager().init_db())" || {
@@ -231,6 +250,8 @@ echo "  用户: blockchain_user"
 echo "  密码: $DB_PASSWORD"
 echo "  API 端口: $API_PORT"
 echo "  项目目录: $PROJECT_DIR"
+echo "  Node.js: $NODE_VERSION"
+echo "  Python: $PYTHON_VERSION"
 echo ""
 echo "下一步操作:"
 echo ""

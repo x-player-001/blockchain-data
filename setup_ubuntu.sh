@@ -1,0 +1,357 @@
+#!/bin/bash
+set -e
+
+echo "=========================================="
+echo "Blockchain Data 项目环境一键配置"
+echo "系统: Ubuntu 24.04 LTS"
+echo "=========================================="
+echo ""
+
+# 颜色定义
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# 检查是否为 root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}错误: 请使用 root 权限运行此脚本${NC}"
+    echo "使用: sudo bash setup_ubuntu.sh"
+    exit 1
+fi
+
+# 获取配置
+read -p "请输入数据库密码 [默认: blockchain123]: " DB_PASSWORD
+DB_PASSWORD=${DB_PASSWORD:-blockchain123}
+
+read -p "请输入 API 端口 [默认: 18763]: " API_PORT
+API_PORT=${API_PORT:-18763}
+
+read -p "请输入你的公网 IP（用于防火墙白名单，留空跳过）: " WHITELIST_IP
+
+echo ""
+echo -e "${GREEN}开始安装...${NC}"
+echo ""
+
+# ==========================================
+# 1. 系统更新
+# ==========================================
+echo -e "${GREEN}[1/9] 更新系统...${NC}"
+apt update
+apt upgrade -y
+
+# ==========================================
+# 2. 安装基础工具
+# ==========================================
+echo -e "${GREEN}[2/9] 安装基础工具...${NC}"
+apt install -y \
+    wget curl git vim tmux \
+    build-essential \
+    software-properties-common \
+    ca-certificates \
+    gnupg \
+    lsb-release
+
+# ==========================================
+# 3. 安装 Python 3.11+
+# ==========================================
+echo -e "${GREEN}[3/9] 安装 Python 3.11...${NC}"
+apt install -y python3 python3-pip python3-venv python3-dev
+
+# 验证版本
+PYTHON_VERSION=$(python3 --version)
+echo "Python 版本: $PYTHON_VERSION"
+
+# 升级 pip
+python3 -m pip install --upgrade pip
+
+# ==========================================
+# 4. 安装 PostgreSQL 16 + TimescaleDB
+# ==========================================
+echo -e "${GREEN}[4/9] 安装 PostgreSQL 16...${NC}"
+
+# 添加 PostgreSQL 官方源
+sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+apt update
+
+# 安装 PostgreSQL
+apt install -y postgresql-16 postgresql-contrib-16
+
+# 启动服务
+systemctl enable postgresql
+systemctl start postgresql
+
+# 添加 TimescaleDB 源
+echo "deb https://packagecloud.io/timescale/timescaledb/ubuntu/ $(lsb_release -c -s) main" | tee /etc/apt/sources.list.d/timescaledb.list
+wget --quiet -O - https://packagecloud.io/timescale/timescaledb/gpgkey | apt-key add -
+apt update
+
+# 安装 TimescaleDB
+apt install -y timescaledb-2-postgresql-16
+
+# 配置 TimescaleDB
+timescaledb-tune --quiet --yes
+
+# 重启 PostgreSQL
+systemctl restart postgresql
+
+echo -e "${GREEN}PostgreSQL 安装完成${NC}"
+
+# ==========================================
+# 5. 创建数据库和用户
+# ==========================================
+echo -e "${GREEN}[5/9] 创建数据库...${NC}"
+
+sudo -u postgres psql <<EOF
+-- 创建数据库
+CREATE DATABASE blockchain_data;
+
+-- 创建用户
+CREATE USER blockchain_user WITH PASSWORD '$DB_PASSWORD';
+
+-- 授权
+GRANT ALL PRIVILEGES ON DATABASE blockchain_data TO blockchain_user;
+
+-- 授予模式权限
+\c blockchain_data
+GRANT ALL ON SCHEMA public TO blockchain_user;
+ALTER DATABASE blockchain_data OWNER TO blockchain_user;
+
+-- 启用 TimescaleDB 扩展
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+\q
+EOF
+
+echo -e "${GREEN}数据库创建完成${NC}"
+
+# 配置 PostgreSQL 允许密码登录
+PG_HBA_FILE="/etc/postgresql/16/main/pg_hba.conf"
+if grep -q "host.*all.*all.*127.0.0.1/32.*md5" "$PG_HBA_FILE"; then
+    echo "PostgreSQL 认证配置已存在"
+else
+    echo "配置 PostgreSQL 认证..."
+    cat >> "$PG_HBA_FILE" <<EOF
+
+# Blockchain Data 项目
+host    all             all             127.0.0.1/32            md5
+host    all             all             ::1/128                 md5
+EOF
+    systemctl restart postgresql
+fi
+
+# ==========================================
+# 6. 安装 Google Chrome
+# ==========================================
+echo -e "${GREEN}[6/9] 安装 Google Chrome...${NC}"
+
+wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+apt install -y /tmp/google-chrome-stable_current_amd64.deb
+rm /tmp/google-chrome-stable_current_amd64.deb
+
+# 验证安装
+google-chrome --version
+
+echo -e "${GREEN}Chrome 安装完成${NC}"
+
+# ==========================================
+# 7. 克隆项目（如果不存在）
+# ==========================================
+echo -e "${GREEN}[7/9] 配置项目...${NC}"
+
+PROJECT_DIR="/root/blockchain-data"
+
+if [ ! -d "$PROJECT_DIR" ]; then
+    echo "克隆项目代码..."
+    cd /root
+    git clone https://github.com/x-player-001/blockchain-data.git
+else
+    echo "项目目录已存在，更新代码..."
+    cd "$PROJECT_DIR"
+    git pull origin main
+fi
+
+cd "$PROJECT_DIR"
+
+# ==========================================
+# 8. 安装 Python 依赖
+# ==========================================
+echo -e "${GREEN}[8/9] 安装 Python 依赖...${NC}"
+
+python3 -m pip install -r requirements.txt
+
+echo -e "${GREEN}依赖安装完成${NC}"
+
+# ==========================================
+# 9. 创建配置文件
+# ==========================================
+echo -e "${GREEN}[9/9] 创建配置文件...${NC}"
+
+# 创建 .env 文件
+cat > "$PROJECT_DIR/.env" <<EOF
+# 数据库配置
+DATABASE_URL=postgresql://blockchain_user:${DB_PASSWORD}@127.0.0.1:5432/blockchain_data
+
+# API 配置
+API_PORT=${API_PORT}
+API_HOST=0.0.0.0
+
+# API Keys（需要手动填写）
+AVE_API_KEY=your_ave_api_key_here
+BSCSCAN_API_KEY=your_bscscan_api_key_here
+
+# 日志级别
+LOG_LEVEL=INFO
+
+# 爬虫配置
+USE_UNDETECTED_CHROME=true
+
+# BSC RPC
+BSC_RPC_URL=https://bsc-dataseed.binance.org/
+
+# 缓存配置
+USE_REDIS=false
+
+# 应用配置
+UPDATE_INTERVAL=300
+MIN_MARKET_CAP=1000000
+MAX_CONCURRENT_REQUESTS=10
+
+# 速率限制
+DEXSCREENER_RATE_LIMIT=300
+GECKOTERMINAL_RATE_LIMIT=30
+BSCSCAN_RATE_LIMIT=5
+EOF
+
+echo -e "${GREEN}配置文件创建完成${NC}"
+
+# ==========================================
+# 10. 初始化数据库表
+# ==========================================
+echo -e "${GREEN}初始化数据库表...${NC}"
+
+cd "$PROJECT_DIR"
+python3 -c "import asyncio; from src.storage.db_manager import DatabaseManager; asyncio.run(DatabaseManager().init_db())" || {
+    echo -e "${YELLOW}警告: 数据库初始化失败，请手动运行${NC}"
+}
+
+# ==========================================
+# 11. 配置防火墙
+# ==========================================
+echo -e "${GREEN}配置防火墙...${NC}"
+
+# 安装 UFW
+apt install -y ufw
+
+# 允许 SSH
+ufw allow 22/tcp
+
+# 配置 API 端口
+if [ -n "$WHITELIST_IP" ]; then
+    echo "只允许 $WHITELIST_IP 访问 API 端口 $API_PORT"
+    ufw allow from $WHITELIST_IP to any port $API_PORT proto tcp
+else
+    echo "允许所有 IP 访问 API 端口 $API_PORT（不推荐）"
+    ufw allow $API_PORT/tcp
+fi
+
+# 启用防火墙
+echo "y" | ufw enable
+
+ufw status
+
+# ==========================================
+# 12. 创建启动脚本
+# ==========================================
+echo -e "${GREEN}创建启动脚本...${NC}"
+
+cat > /root/start_blockchain.sh <<'SCRIPT_EOF'
+#!/bin/bash
+
+PROJECT_DIR="/root/blockchain-data"
+cd "$PROJECT_DIR"
+
+echo "停止旧服务..."
+tmux kill-session -t blockchain-api 2>/dev/null
+tmux kill-session -t blockchain-scheduler 2>/dev/null
+sleep 2
+
+echo "启动 API 服务..."
+tmux new -s blockchain-api -d "cd $PROJECT_DIR && python3 run_api.py"
+sleep 3
+
+echo "启动定时任务..."
+tmux new -s blockchain-scheduler -d "cd $PROJECT_DIR && python3 scheduler_daemon.py"
+sleep 3
+
+echo ""
+echo "=========================================="
+echo "服务启动完成！"
+echo "=========================================="
+echo ""
+echo "查看服务状态:"
+tmux ls
+echo ""
+echo "查看 API 日志:"
+echo "  tmux attach -t blockchain-api"
+echo ""
+echo "查看 Scheduler 日志:"
+echo "  tmux attach -t blockchain-scheduler"
+echo ""
+echo "退出 tmux: Ctrl+B 然后按 D"
+echo "=========================================="
+SCRIPT_EOF
+
+chmod +x /root/start_blockchain.sh
+
+# 创建停止脚本
+cat > /root/stop_blockchain.sh <<'SCRIPT_EOF'
+#!/bin/bash
+
+echo "停止所有服务..."
+tmux kill-session -t blockchain-api 2>/dev/null
+tmux kill-session -t blockchain-scheduler 2>/dev/null
+pkill -f "run_api.py" 2>/dev/null
+pkill -f "scheduler_daemon.py" 2>/dev/null
+
+echo "服务已停止"
+SCRIPT_EOF
+
+chmod +x /root/stop_blockchain.sh
+
+# ==========================================
+# 完成
+# ==========================================
+echo ""
+echo -e "${GREEN}=========================================="
+echo "安装完成！"
+echo "==========================================${NC}"
+echo ""
+echo "配置信息:"
+echo "  数据库: blockchain_data"
+echo "  用户: blockchain_user"
+echo "  密码: $DB_PASSWORD"
+echo "  API 端口: $API_PORT"
+echo "  项目目录: $PROJECT_DIR"
+echo ""
+echo "下一步操作:"
+echo ""
+echo "1. 编辑 .env 文件，填入 API keys:"
+echo "   vim $PROJECT_DIR/.env"
+echo ""
+echo "2. 启动服务:"
+echo "   /root/start_blockchain.sh"
+echo ""
+echo "3. 查看服务状态:"
+echo "   tmux ls"
+echo ""
+echo "4. 测试 API:"
+echo "   curl http://localhost:$API_PORT/docs"
+echo ""
+echo "5. 停止服务:"
+echo "   /root/stop_blockchain.sh"
+echo ""
+echo -e "${YELLOW}注意: 请修改 .env 文件中的 AVE_API_KEY!${NC}"
+echo ""
+echo "=========================================="

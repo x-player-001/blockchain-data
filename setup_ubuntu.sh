@@ -27,8 +27,6 @@ DB_PASSWORD=${DB_PASSWORD:-blockchain123}
 read -p "请输入 API 端口 [默认: 18763]: " API_PORT
 API_PORT=${API_PORT:-18763}
 
-read -p "请输入你的公网 IP（用于防火墙白名单，留空跳过）: " WHITELIST_IP
-
 echo ""
 echo -e "${GREEN}开始安装...${NC}"
 echo ""
@@ -237,90 +235,6 @@ python3 -c "import asyncio; from src.storage.db_manager import DatabaseManager; 
 }
 
 # ==========================================
-# 11. 配置防火墙
-# ==========================================
-echo -e "${GREEN}配置防火墙...${NC}"
-
-# 安装 UFW
-apt install -y ufw
-
-# 允许 SSH
-ufw allow 22/tcp
-
-# 配置 API 端口
-if [ -n "$WHITELIST_IP" ]; then
-    echo "只允许 $WHITELIST_IP 访问 API 端口 $API_PORT"
-    ufw allow from $WHITELIST_IP to any port $API_PORT proto tcp
-else
-    echo "允许所有 IP 访问 API 端口 $API_PORT（不推荐）"
-    ufw allow $API_PORT/tcp
-fi
-
-# 启用防火墙
-echo "y" | ufw enable
-
-ufw status
-
-# ==========================================
-# 12. 创建启动脚本
-# ==========================================
-echo -e "${GREEN}创建启动脚本...${NC}"
-
-cat > /root/start_blockchain.sh <<'SCRIPT_EOF'
-#!/bin/bash
-
-PROJECT_DIR="/root/blockchain-data"
-cd "$PROJECT_DIR"
-
-echo "停止旧服务..."
-tmux kill-session -t blockchain-api 2>/dev/null
-tmux kill-session -t blockchain-scheduler 2>/dev/null
-sleep 2
-
-echo "启动 API 服务..."
-tmux new -s blockchain-api -d "cd $PROJECT_DIR && python3 run_api.py"
-sleep 3
-
-echo "启动定时任务..."
-tmux new -s blockchain-scheduler -d "cd $PROJECT_DIR && python3 scheduler_daemon.py"
-sleep 3
-
-echo ""
-echo "=========================================="
-echo "服务启动完成！"
-echo "=========================================="
-echo ""
-echo "查看服务状态:"
-tmux ls
-echo ""
-echo "查看 API 日志:"
-echo "  tmux attach -t blockchain-api"
-echo ""
-echo "查看 Scheduler 日志:"
-echo "  tmux attach -t blockchain-scheduler"
-echo ""
-echo "退出 tmux: Ctrl+B 然后按 D"
-echo "=========================================="
-SCRIPT_EOF
-
-chmod +x /root/start_blockchain.sh
-
-# 创建停止脚本
-cat > /root/stop_blockchain.sh <<'SCRIPT_EOF'
-#!/bin/bash
-
-echo "停止所有服务..."
-tmux kill-session -t blockchain-api 2>/dev/null
-tmux kill-session -t blockchain-scheduler 2>/dev/null
-pkill -f "run_api.py" 2>/dev/null
-pkill -f "scheduler_daemon.py" 2>/dev/null
-
-echo "服务已停止"
-SCRIPT_EOF
-
-chmod +x /root/stop_blockchain.sh
-
-# ==========================================
 # 完成
 # ==========================================
 echo ""
@@ -340,17 +254,18 @@ echo ""
 echo "1. 编辑 .env 文件，填入 API keys:"
 echo "   vim $PROJECT_DIR/.env"
 echo ""
-echo "2. 启动服务:"
-echo "   /root/start_blockchain.sh"
+echo "2. 手动启动 API 服务:"
+echo "   cd $PROJECT_DIR"
+echo "   tmux new -s blockchain-api -d 'python3 run_api.py'"
 echo ""
-echo "3. 查看服务状态:"
+echo "3. 手动启动定时任务:"
+echo "   tmux new -s blockchain-scheduler -d 'cd $PROJECT_DIR && python3 scheduler_daemon.py'"
+echo ""
+echo "4. 查看服务状态:"
 echo "   tmux ls"
 echo ""
-echo "4. 测试 API:"
+echo "5. 测试 API:"
 echo "   curl http://localhost:$API_PORT/docs"
-echo ""
-echo "5. 停止服务:"
-echo "   /root/stop_blockchain.sh"
 echo ""
 echo -e "${YELLOW}注意: 请修改 .env 文件中的 AVE_API_KEY!${NC}"
 echo ""

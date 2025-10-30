@@ -68,10 +68,9 @@ apt install -y --no-upgrade python3 python3-pip python3-venv python3-dev
 
 # 验证版本
 PYTHON_VERSION=$(python3 --version)
+PIP_VERSION=$(python3 -m pip --version)
 echo "Python 版本: $PYTHON_VERSION"
-
-# 升级 pip（Ubuntu 24.04 需要 --break-system-packages）
-python3 -m pip install --upgrade pip --break-system-packages
+echo "pip 版本: $PIP_VERSION"
 
 # ==========================================
 # 4. 安装 Node.js 20 LTS

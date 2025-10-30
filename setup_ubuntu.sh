@@ -64,7 +64,7 @@ echo "Python 版本: $PYTHON_VERSION"
 python3 -m pip install --upgrade pip
 
 # ==========================================
-# 4. 安装 PostgreSQL 16 + TimescaleDB
+# 4. 安装 PostgreSQL 16
 # ==========================================
 echo -e "${GREEN}[4/9] 安装 PostgreSQL 16...${NC}"
 
@@ -79,20 +79,6 @@ apt install -y postgresql-16 postgresql-contrib-16
 # 启动服务
 systemctl enable postgresql
 systemctl start postgresql
-
-# 添加 TimescaleDB 源
-echo "deb https://packagecloud.io/timescale/timescaledb/ubuntu/ $(lsb_release -c -s) main" | tee /etc/apt/sources.list.d/timescaledb.list
-wget --quiet -O - https://packagecloud.io/timescale/timescaledb/gpgkey | apt-key add -
-apt update
-
-# 安装 TimescaleDB
-apt install -y timescaledb-2-postgresql-16
-
-# 配置 TimescaleDB
-timescaledb-tune --quiet --yes
-
-# 重启 PostgreSQL
-systemctl restart postgresql
 
 echo -e "${GREEN}PostgreSQL 安装完成${NC}"
 
@@ -115,9 +101,6 @@ GRANT ALL PRIVILEGES ON DATABASE blockchain_data TO blockchain_user;
 \c blockchain_data
 GRANT ALL ON SCHEMA public TO blockchain_user;
 ALTER DATABASE blockchain_data OWNER TO blockchain_user;
-
--- 启用 TimescaleDB 扩展
-CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 \q
 EOF

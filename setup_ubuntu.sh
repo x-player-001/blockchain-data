@@ -221,7 +221,7 @@ echo -e "${GREEN}配置文件创建完成${NC}"
 echo ""
 echo "初始化数据库表..."
 cd "$PROJECT_DIR"
-python3 -c "import asyncio; from src.storage.db_manager import DatabaseManager; asyncio.run(DatabaseManager().init_db())" || {
+python3 -c "from src.storage.db_manager import DatabaseManager; DatabaseManager().init_db()" || {
     echo -e "${YELLOW}警告: 数据库初始化失败，请手动运行${NC}"
 }
 

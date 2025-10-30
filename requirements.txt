@@ -44,9 +44,11 @@ urllib3==1.26.18  # 兼容旧版本 OpenSSL (1.0.2)
 python-dateutil==2.8.2
 
 # Web Scraping (for DexScreener)
+beautifulsoup4==4.12.2  # HTML parsing
 cloudscraper==1.2.71  # Cloudflare bypass
 undetected-chromedriver==3.5.4
 selenium==4.16.0
+lxml==4.9.3  # XML parser for BeautifulSoup
 
 # Testing
 pytest==7.4.3

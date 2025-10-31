@@ -97,10 +97,22 @@ class AveApiService:
             logger.warning("Pair not found or data is empty")
             return None
 
+        # 获取链类型，判断是否需要转小写
+        # EVM 链（bsc, eth, polygon 等）地址不区分大小写，统一转小写
+        # Solana 链地址使用 Base58 编码，区分大小写，不能转小写
+        chain = data.get('chain', 'bsc').lower()
+        is_evm_chain = chain in ['bsc', 'eth', 'ethereum', 'polygon', 'matic', 'arbitrum', 'optimism', 'avalanche', 'base']
+
         # 判断哪个是目标代币（使用target_token字段）
-        target_token = data.get('target_token', '').lower()
-        token0_address = data.get('token0_address', '').lower()
-        token1_address = data.get('token1_address', '').lower()
+        # 只对 EVM 链转小写，Solana 保持原样
+        if is_evm_chain:
+            target_token = data.get('target_token', '').lower()
+            token0_address = data.get('token0_address', '').lower()
+            token1_address = data.get('token1_address', '').lower()
+        else:
+            target_token = data.get('target_token', '')
+            token0_address = data.get('token0_address', '')
+            token1_address = data.get('token1_address', '')
 
         # 根据target_token确定使用哪个价格
         if target_token == token0_address:

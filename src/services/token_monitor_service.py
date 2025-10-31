@@ -1638,6 +1638,10 @@ class TokenMonitorService:
                         continue
 
                     # 更新所有AVE API字段（和 MonitoredToken 一样的逻辑）
+                    # 更新真实的 token 合约地址（修正爬虫时使用 pair_address 的问题）
+                    if pair_data.get('token_address'):
+                        token.token_address = pair_data['token_address']
+
                     if pair_data.get('current_price_usd'):
                         token.current_price_usd = pair_data['current_price_usd']
 

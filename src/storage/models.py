@@ -52,7 +52,7 @@ class TokenMetrics(Base):
     market_cap = Column(Numeric(30, 2), nullable=True)
     liquidity_usd = Column(Numeric(30, 2), nullable=True)
     volume_24h = Column(Numeric(30, 2), nullable=True)
-    price_change_24h = Column(Numeric(10, 2), nullable=True)
+    price_change_24h = Column(Numeric(20, 2), nullable=True)
 
     # Token statistics
     holders_count = Column(Integer, nullable=True)
@@ -295,9 +295,9 @@ class DexScreenerToken(Base):
     txns_h24_sells = Column(Integer, nullable=True)
 
     # Price changes
-    price_change_h1 = Column(Numeric(10, 2), nullable=True)
-    price_change_h6 = Column(Numeric(10, 2), nullable=True)
-    price_change_h24 = Column(Numeric(10, 2), nullable=True)
+    price_change_h1 = Column(Numeric(20, 2), nullable=True)
+    price_change_h6 = Column(Numeric(20, 2), nullable=True)
+    price_change_h24 = Column(Numeric(20, 2), nullable=True)
 
     # Liquidity
     liquidity_usd = Column(Numeric(30, 2), nullable=True)
@@ -369,7 +369,7 @@ class PotentialToken(Base):
     market_cap_at_scrape = Column(Numeric(30, 2), nullable=True)
     liquidity_at_scrape = Column(Numeric(30, 2), nullable=True)
     volume_24h_at_scrape = Column(Numeric(30, 2), nullable=True)
-    price_change_24h_at_scrape = Column(Numeric(10, 2), nullable=True)  # The gain % when scraped
+    price_change_24h_at_scrape = Column(Numeric(20, 2), nullable=True)  # The gain % when scraped
 
     # Current data (updated by AVE API)
     current_price_usd = Column(Numeric(30, 18), nullable=True)
@@ -378,13 +378,13 @@ class PotentialToken(Base):
     current_market_cap = Column(Numeric(30, 2), nullable=True)
 
     # Price changes (multiple timeframes)
-    price_change_1m = Column(Numeric(10, 2), nullable=True)
-    price_change_5m = Column(Numeric(10, 2), nullable=True)
-    price_change_15m = Column(Numeric(10, 2), nullable=True)
-    price_change_30m = Column(Numeric(10, 2), nullable=True)
-    price_change_1h = Column(Numeric(10, 2), nullable=True)
-    price_change_4h = Column(Numeric(10, 2), nullable=True)
-    price_change_24h = Column(Numeric(10, 2), nullable=True)
+    price_change_1m = Column(Numeric(20, 2), nullable=True)
+    price_change_5m = Column(Numeric(20, 2), nullable=True)
+    price_change_15m = Column(Numeric(20, 2), nullable=True)
+    price_change_30m = Column(Numeric(20, 2), nullable=True)
+    price_change_1h = Column(Numeric(20, 2), nullable=True)
+    price_change_4h = Column(Numeric(20, 2), nullable=True)
+    price_change_24h = Column(Numeric(20, 2), nullable=True)
 
     # Volume data (multiple timeframes)
     volume_1m = Column(Numeric(30, 2), nullable=True)
@@ -496,20 +496,20 @@ class MonitoredToken(Base):
     market_cap_at_entry = Column(Numeric(30, 2), nullable=True)
     liquidity_at_entry = Column(Numeric(30, 2), nullable=True)
     volume_24h_at_entry = Column(Numeric(30, 2), nullable=True)
-    price_change_24h_at_entry = Column(Numeric(10, 2), nullable=True)  # The gain % when added
+    price_change_24h_at_entry = Column(Numeric(20, 2), nullable=True)  # The gain % when added
 
     # Current market data (from latest update)
     current_tvl = Column(Numeric(30, 2), nullable=True)  # Total Value Locked
     current_market_cap = Column(Numeric(30, 2), nullable=True)
 
     # Price changes (multiple timeframes)
-    price_change_1m = Column(Numeric(10, 2), nullable=True)
-    price_change_5m = Column(Numeric(10, 2), nullable=True)
-    price_change_15m = Column(Numeric(10, 2), nullable=True)
-    price_change_30m = Column(Numeric(10, 2), nullable=True)
-    price_change_1h = Column(Numeric(10, 2), nullable=True)
-    price_change_4h = Column(Numeric(10, 2), nullable=True)
-    price_change_24h = Column(Numeric(10, 2), nullable=True)
+    price_change_1m = Column(Numeric(20, 2), nullable=True)
+    price_change_5m = Column(Numeric(20, 2), nullable=True)
+    price_change_15m = Column(Numeric(20, 2), nullable=True)
+    price_change_30m = Column(Numeric(20, 2), nullable=True)
+    price_change_1h = Column(Numeric(20, 2), nullable=True)
+    price_change_4h = Column(Numeric(20, 2), nullable=True)
+    price_change_24h = Column(Numeric(20, 2), nullable=True)
 
     # Volume data (multiple timeframes)
     volume_1m = Column(Numeric(30, 2), nullable=True)

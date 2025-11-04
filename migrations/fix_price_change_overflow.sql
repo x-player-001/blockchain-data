@@ -3,41 +3,61 @@
 -- 将 NUMERIC(10, 2) 扩展为 NUMERIC(20, 2)
 -- ============================================
 
-BEGIN;
+-- ============================================
+-- 分别处理每个表，避免一个失败导致全部回滚
+-- ============================================
 
 -- 1. PotentialToken 表
-ALTER TABLE potential_tokens
-    ALTER COLUMN price_change_1m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_5m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_15m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_30m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_1h TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_4h TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_24h TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_24h_at_scrape TYPE NUMERIC(20, 2);
-
-SELECT '✓ PotentialToken 表字段已更新' as status;
+DO $$
+BEGIN
+    ALTER TABLE potential_tokens
+        ALTER COLUMN price_change_1m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_5m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_15m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_30m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_1h TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_4h TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_24h TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_24h_at_scrape TYPE NUMERIC(20, 2);
+    RAISE NOTICE '✓ PotentialToken 表字段已更新';
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE '⚠ PotentialToken 表更新失败: %', SQLERRM;
+END $$;
 
 -- 2. MonitoredToken 表
-ALTER TABLE monitored_tokens
-    ALTER COLUMN price_change_1m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_5m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_15m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_30m TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_1h TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_4h TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_24h TYPE NUMERIC(20, 2),
-    ALTER COLUMN price_change_24h_at_entry TYPE NUMERIC(20, 2);
+DO $$
+BEGIN
+    ALTER TABLE monitored_tokens
+        ALTER COLUMN price_change_1m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_5m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_15m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_30m TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_1h TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_4h TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_24h TYPE NUMERIC(20, 2),
+        ALTER COLUMN price_change_24h_at_entry TYPE NUMERIC(20, 2);
+    RAISE NOTICE '✓ MonitoredToken 表字段已更新';
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE '⚠ MonitoredToken 表更新失败: %', SQLERRM;
+END $$;
 
-SELECT '✓ MonitoredToken 表字段已更新' as status;
+-- 3. Token 表（检查字段是否存在）
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'tokens' AND column_name = 'price_change_24h'
+    ) THEN
+        ALTER TABLE tokens ALTER COLUMN price_change_24h TYPE NUMERIC(20, 2);
+        RAISE NOTICE '✓ Token 表字段已更新';
+    ELSE
+        RAISE NOTICE 'ℹ Token 表不存在 price_change_24h 字段，跳过';
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE '⚠ Token 表更新失败: %', SQLERRM;
+END $$;
 
--- 3. Token 表
-ALTER TABLE tokens
-    ALTER COLUMN price_change_24h TYPE NUMERIC(20, 2);
-
-SELECT '✓ Token 表字段已更新' as status;
-
--- 4. DexScreenerToken 表（如果存在）
+-- 4. DexScreenerToken 表（检查表和字段是否存在）
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'dexscreener_tokens') THEN
@@ -49,9 +69,9 @@ BEGIN
     ELSE
         RAISE NOTICE 'ℹ DexScreenerToken 表不存在，跳过';
     END IF;
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE '⚠ DexScreenerToken 表更新失败: %', SQLERRM;
 END $$;
-
-COMMIT;
 
 -- 显示更新结果
 DO $$
